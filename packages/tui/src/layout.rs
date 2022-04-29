@@ -27,10 +27,17 @@ impl<T> Default for PossiblyUninitalized<T> {
     }
 }
 
-#[derive(Clone, PartialEq, Default, Debug)]
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Line {
+    pub node: Node,
+    pub words: Vec<Node>,
+}
+
+#[derive(Clone, PartialEq, Debug, Default)]
 pub(crate) struct StretchLayout {
     pub style: Style,
     pub node: PossiblyUninitalized<Node>,
+    pub lines: Option<Vec<Line>>,
 }
 
 impl ChildDepState for StretchLayout {
@@ -54,25 +61,64 @@ impl ChildDepState for StretchLayout {
         let mut stretch = ctx.borrow_mut();
         let mut style = Style::default();
         if let Some(text) = node.text() {
-            let char_len = text.chars().count();
+            if let Some(lines) = self.lines.take() {
+                for l in lines.iter() {
+                    stretch.remove(l.node);
+                }
+            }
+            let mut lines = Vec::new();
+            for l in text.lines() {
+                let mut words = Vec::new();
+                for w in l.split_inclusive(' ') {
+                    words.push(
+                        stretch
+                            .new_node(
+                                Style {
+                                    size: Size {
+                                        // characters are 1 point tall
+                                        height: Dimension::Points(1.0),
 
+                                        // text is as long as it is declared
+                                        width: Dimension::Points(w.len() as f32),
+                                    },
+                                    ..Default::default()
+                                },
+                                &[],
+                            )
+                            .unwrap(),
+                    );
+                }
+                lines.push(Line {
+                    node: stretch
+                        .new_node(
+                            Style {
+                                flex_direction: FlexDirection::Row,
+                                flex_wrap: FlexWrap::Wrap,
+                                flex_shrink: 0.0,
+                                ..Default::default()
+                            },
+                            &words,
+                        )
+                        .unwrap(),
+                    words,
+                });
+            }
             style = Style {
-                size: Size {
-                    // characters are 1 point tall
-                    height: Dimension::Points(1.0),
-
-                    // text is as long as it is declared
-                    width: Dimension::Points(char_len as f32),
-                },
+                flex_direction: FlexDirection::Column,
                 ..Default::default()
             };
+            let children: Vec<_> = lines.iter().map(|l| l.node).collect();
             if let PossiblyUninitalized::Initialized(n) = self.node {
                 if self.style != style {
                     stretch.set_style(n, style).unwrap();
                 }
+                if self.lines != Some(lines) {
+                    stretch.set_children(n, &children).unwrap();
+                }
             } else {
                 self.node =
-                    PossiblyUninitalized::Initialized(stretch.new_node(style, &[]).unwrap());
+                    PossiblyUninitalized::Initialized(stretch.new_node(style, &children).unwrap());
+                self.lines = Some(lines);
             }
         } else {
             // gather up all the styles from the attribute list

@@ -36,26 +36,50 @@ pub(crate) fn render_vnode(
 
     match &node.node_type {
         NodeType::Text { text } => {
-            #[derive(Default)]
+            #[derive(Debug)]
             struct Label<'a> {
                 text: &'a str,
                 style: RinkStyle,
+                lines: Vec<Vec<Rect>>,
             }
 
             impl<'a> RinkWidget for Label<'a> {
-                fn render(self, area: Rect, mut buf: RinkBuffer) {
-                    for (i, c) in self.text.char_indices() {
-                        let mut new_cell = RinkCell::default();
-                        new_cell.set_style(self.style);
-                        new_cell.symbol = c.to_string();
-                        buf.set(area.left() + i as u16, area.top(), new_cell);
+                fn render(self, _: Rect, mut buf: RinkBuffer) {
+                    for (l, line_layout) in self.text.lines().zip(&self.lines) {
+                        for (w, rect) in l.split_inclusive(' ').zip(line_layout) {
+                            let w = w.trim();
+                            for (i, c) in w.char_indices() {
+                                let mut new_cell = RinkCell::default();
+                                new_cell.set_style(self.style);
+                                new_cell.symbol = c.to_string();
+                                buf.set(rect.left() + i as u16, rect.top(), new_cell);
+                            }
+                        }
                     }
                 }
+            }
+
+            let mut lines = Vec::new();
+            for l in node.state.layout.lines.as_ref().unwrap() {
+                let mut line = Vec::new();
+                for w in &l.words {
+                    let Layout { location, size, .. } = layout.layout(*w).unwrap();
+                    let Point { x, y } = location;
+                    let Size { width, height } = size;
+                    line.push(Rect::new(
+                        *x as u16,
+                        *y as u16,
+                        *width as u16,
+                        *height as u16,
+                    ));
+                }
+                lines.push(line);
             }
 
             let label = Label {
                 text,
                 style: node.state.style.core,
+                lines,
             };
             let area = Rect::new(*x as u16, *y as u16, *width as u16, *height as u16);
 

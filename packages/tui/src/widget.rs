@@ -23,7 +23,7 @@ impl<'a> RinkBuffer<'a> {
     pub fn set(&mut self, x: u16, y: u16, new: RinkCell) {
         let area = self.buf.area();
         if x < area.x || x > area.width || y < area.y || y > area.height {
-            panic!("({x}, {y}) is not in {area:?}");
+            panic!("({x}, {y}) is not in {area:?} trying to set {new:?}");
         }
         let mut cell = self.buf.get_mut(x, y);
         cell.bg = convert(self.cfg.rendering_mode, new.bg.blend(cell.bg));
@@ -61,7 +61,7 @@ impl<T: RinkWidget> Widget for WidgetWithContext<T> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RinkCell {
     pub symbol: String,
     pub bg: RinkColor,
