@@ -1,7 +1,10 @@
 use anyhow::Result;
 use anymap::AnyMap;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyModifiers},
+    cursor::{Hide, Show},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyModifiers,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -9,28 +12,39 @@ use dioxus_core::exports::futures_channel::mpsc::unbounded;
 use dioxus_core::*;
 use dioxus_native_core::{real_dom::RealDom, state::*};
 use dioxus_native_core_macro::State;
+use euclid::{Box2D, Point2D, Size2D};
 use futures::{
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     pin_mut, StreamExt,
 };
 use layout::StretchLayout;
-use std::cell::RefCell;
 use std::rc::Rc;
-use std::{io, time::Duration};
-use stretch2::{prelude::Size, Stretch};
+use std::time::Duration;
+use std::{
+    cell::RefCell,
+    sync::{Arc, Mutex},
+};
+use stretch2::{
+    prelude::{Layout, Size},
+    Stretch,
+};
 use style_attributes::StyleModifier;
-use tui::{backend::CrosstermBackend, layout::Rect, Terminal};
+use terminal::Terminal;
 
+mod border_set;
 mod config;
 mod hooks;
 mod layout;
 mod render;
 mod style;
 mod style_attributes;
+mod terminal;
 mod widget;
 
 pub use config::*;
 pub use hooks::*;
+
+use crate::terminal::RegionMask;
 
 type Dom = RealDom<NodeState>;
 type Node = dioxus_native_core::real_dom::Node<NodeState>;
@@ -63,6 +77,13 @@ pub fn launch_cfg(app: Component<()>, cfg: Config) {
 
     let (handler, state, register_event) = RinkInputHandler::new();
 
+    let term = Arc::new(Mutex::new(if cfg.headless {
+        None
+    } else {
+        Some(Terminal::default())
+    }));
+    let weak_term = Arc::downgrade(&term);
+
     // Setup input handling
     let (event_tx, event_rx) = unbounded();
     let event_tx_clone = event_tx.clone();
@@ -71,8 +92,16 @@ pub fn launch_cfg(app: Component<()>, cfg: Config) {
             let tick_rate = Duration::from_millis(1000);
             loop {
                 if crossterm::event::poll(tick_rate).unwrap() {
-                    // if crossterm::event::poll(timeout).unwrap() {
                     let evt = crossterm::event::read().unwrap();
+                    if let event::Event::Resize(w, h) = evt {
+                        if let Some(term) = weak_term.upgrade() {
+                            if let Some(term) = &mut *term.lock().unwrap() {
+                                term.resize(w, h);
+                            }
+                        } else {
+                            break;
+                        }
+                    }
                     if event_tx.unbounded_send(InputEvent::UserInput(evt)).is_err() {
                         break;
                     }
@@ -101,6 +130,7 @@ pub fn launch_cfg(app: Component<()>, cfg: Config) {
         rdom,
         stretch,
         register_event,
+        term,
     )
     .unwrap();
 }
@@ -113,20 +143,15 @@ fn render_vdom(
     mut rdom: Dom,
     stretch: Rc<RefCell<Stretch>>,
     mut register_event: impl FnMut(crossterm::event::Event),
+    term: Arc<Mutex<Option<Terminal>>>,
 ) -> Result<()> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
         .block_on(async {
-            let mut terminal = (!cfg.headless).then(|| {
+            if let Some(term) = &mut *term.lock().unwrap() {
                 enable_raw_mode().unwrap();
-                let mut stdout = std::io::stdout();
-                execute!(stdout, EnterAlternateScreen, EnableMouseCapture).unwrap();
-                let backend = CrosstermBackend::new(io::stdout());
-                Terminal::new(backend).unwrap()
-            });
-            if let Some(terminal) = &mut terminal {
-                terminal.clear().unwrap();
+                execute!(term.out, EnterAlternateScreen, EnableMouseCapture, Hide).unwrap();
             }
 
             let mut to_rerender: fxhash::FxHashSet<usize> = vec![0].into_iter().collect();
@@ -145,8 +170,7 @@ fn render_vdom(
                 */
 
                 if !to_rerender.is_empty() || resized {
-                    resized = false;
-                    fn resize(dims: Rect, stretch: &mut Stretch, rdom: &Dom) {
+                    fn resize(dims: Size2D<u16, u16>, stretch: &mut Stretch, rdom: &Dom) {
                         let width = dims.width;
                         let height = dims.height;
                         let root_node = rdom[0].state.layout.node.unwrap();
@@ -161,25 +185,45 @@ fn render_vdom(
                             )
                             .unwrap();
                     }
-                    if let Some(terminal) = &mut terminal {
-                        terminal.draw(|frame| {
-                            // size is guaranteed to not change when rendering
-                            resize(frame.size(), &mut stretch.borrow_mut(), &rdom);
-                            let root = &rdom[0];
-                            render::render_vnode(frame, &stretch.borrow(), &rdom, root, cfg);
-                        })?;
+                    if let Some(terminal) = &mut *term.lock().unwrap() {
+                        // it is safe to resize while the terminal is locked
+                        resize(terminal.size(), &mut stretch.borrow_mut(), &rdom);
+                        let root = &rdom[0];
+                        if resized {
+                            let dirty = [Box2D::new(
+                                Point2D::new(0, 0),
+                                Point2D::zero() + terminal.size(),
+                            )];
+                            let mut mask = RegionMask::new(terminal, &dirty);
+                            render::render_vnode(&mut mask, &stretch.borrow(), &rdom, root, cfg);
+                            mask.commit(cfg.rendering_mode);
+                        } else {
+                            let stretch = stretch.borrow_mut();
+                            let dirty: Vec<_> = to_rerender
+                                .iter()
+                                .map(|i| {
+                                    let node = &rdom[*i];
+                                    let Layout { location, size, .. } =
+                                        stretch.layout(node.state.layout.node.unwrap()).unwrap();
+                                    let start = Point2D::new(location.x as u16, location.y as u16);
+                                    let end =
+                                        start + Size2D::new(size.width as u16, size.height as u16);
+
+                                    Box2D::new(start, end)
+                                })
+                                .collect();
+                            let mut mask = RegionMask::new(terminal, &dirty);
+                            // for id in to_rerender.iter() {
+                            //     let node = &rdom[*id];
+                            //     render::render_vnode(&mut mask, &stretch, &rdom, node, cfg);
+                            // }
+                            render::render_vnode(&mut mask, &stretch, &rdom, root, cfg);
+                            mask.commit(cfg.rendering_mode);
+                        }
                     } else {
-                        resize(
-                            Rect {
-                                x: 0,
-                                y: 0,
-                                width: 300,
-                                height: 300,
-                            },
-                            &mut stretch.borrow_mut(),
-                            &rdom,
-                        );
+                        resize(Size2D::new(300, 300), &mut stretch.borrow_mut(), &rdom);
                     }
+                    resized = false;
                 }
 
                 use futures::future::{select, Either};
@@ -230,14 +274,14 @@ fn render_vdom(
                 }
             }
 
-            if let Some(terminal) = &mut terminal {
+            if let Some(terminal) = &mut *term.lock().unwrap() {
                 disable_raw_mode()?;
                 execute!(
-                    terminal.backend_mut(),
+                    terminal.out,
                     LeaveAlternateScreen,
-                    DisableMouseCapture
+                    DisableMouseCapture,
+                    Show
                 )?;
-                terminal.show_cursor()?;
             }
 
             Ok(())

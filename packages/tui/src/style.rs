@@ -1,42 +1,13 @@
 use std::{num::ParseFloatError, str::FromStr};
 
-use tui::style::{Color, Modifier, Style};
-
 use crate::RenderingMode;
+use crossterm::style::{Attribute, Attributes, Color};
+use packed_simd::u16x4;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct RinkColor {
-    pub color: Color,
-    pub alpha: u8,
-}
-
-impl Default for RinkColor {
-    fn default() -> Self {
-        Self {
-            color: Color::Black,
-            alpha: 0,
-        }
-    }
-}
-
-impl RinkColor {
-    pub fn blend(self, other: Color) -> Color {
-        if self.color == Color::Reset {
-            Color::Reset
-        } else if self.alpha == 0 {
-            other
-        } else {
-            let [sr, sg, sb] = to_rgb(self.color).map(|e| e as u16);
-            let [or, og, ob] = to_rgb(other).map(|e| e as u16);
-            let sa = self.alpha as u16;
-            let rsa = 255 - sa;
-            Color::Rgb(
-                ((sr * sa + or * rsa) / 255) as u8,
-                ((sg * sa + og * rsa) / 255) as u8,
-                ((sb * sa + ob * rsa) / 255) as u8,
-            )
-        }
-    }
+    pub rgb: packed_simd::u16x4,
+    pub alpha: u16,
 }
 
 fn parse_value(
@@ -53,7 +24,7 @@ fn parse_value(
 
 pub struct ParseColorError;
 
-fn parse_hex(color: &str) -> Result<Color, ParseColorError> {
+fn parse_hex(color: &str) -> Result<[u8; 3], ParseColorError> {
     let mut values = [0, 0, 0];
     let mut color_ok = true;
     for i in 0..values.len() {
@@ -64,13 +35,13 @@ fn parse_hex(color: &str) -> Result<Color, ParseColorError> {
         }
     }
     if color_ok {
-        Ok(Color::Rgb(values[0], values[1], values[2]))
+        Ok(values)
     } else {
         Err(ParseColorError)
     }
 }
 
-fn parse_rgb(color: &str) -> Result<Color, ParseColorError> {
+fn parse_rgb(color: &str) -> Result<[u8; 3], ParseColorError> {
     let mut values = [0, 0, 0];
     let mut color_ok = true;
     for (v, i) in color.split(',').zip(0..values.len()) {
@@ -81,13 +52,13 @@ fn parse_rgb(color: &str) -> Result<Color, ParseColorError> {
         }
     }
     if color_ok {
-        Ok(Color::Rgb(values[0], values[1], values[2]))
+        Ok(values)
     } else {
         Err(ParseColorError)
     }
 }
 
-fn parse_hsl(color: &str) -> Result<Color, ParseColorError> {
+fn parse_hsl(color: &str) -> Result<[u8; 3], ParseColorError> {
     let mut values = [0.0, 0.0, 0.0];
     let mut color_ok = true;
     for (v, i) in color.split(',').zip(0..values.len()) {
@@ -133,7 +104,7 @@ fn parse_hsl(color: &str) -> Result<Color, ParseColorError> {
             ]
         };
 
-        Ok(Color::Rgb(rgb[0], rgb[1], rgb[2]))
+        Ok(rgb)
     } else {
         Err(ParseColorError)
     }
@@ -145,75 +116,75 @@ impl FromStr for RinkColor {
     fn from_str(color: &str) -> Result<Self, Self::Err> {
         match color {
             "red" => Ok(RinkColor {
-                color: Color::Red,
+                rgb: rgb(255, 0, 0),
                 alpha: 255,
             }),
             "black" => Ok(RinkColor {
-                color: Color::Black,
+                rgb: rgb(0, 0, 0),
                 alpha: 255,
             }),
             "green" => Ok(RinkColor {
-                color: Color::Green,
+                rgb: rgb(0, 255, 0),
                 alpha: 255,
             }),
             "yellow" => Ok(RinkColor {
-                color: Color::Yellow,
+                rgb: rgb(255, 255, 0),
                 alpha: 255,
             }),
             "blue" => Ok(RinkColor {
-                color: Color::Blue,
+                rgb: rgb(0, 0, 255),
                 alpha: 255,
             }),
             "magenta" => Ok(RinkColor {
-                color: Color::Magenta,
+                rgb: rgb(255, 0, 255),
                 alpha: 255,
             }),
             "cyan" => Ok(RinkColor {
-                color: Color::Cyan,
+                rgb: rgb(0, 255, 255),
                 alpha: 255,
             }),
             "gray" => Ok(RinkColor {
-                color: Color::Gray,
+                rgb: rgb(128, 128, 128),
                 alpha: 255,
             }),
             "darkgray" => Ok(RinkColor {
-                color: Color::DarkGray,
+                rgb: rgb(169, 169, 169),
                 alpha: 255,
             }),
             // light red does not exist
             "orangered" => Ok(RinkColor {
-                color: Color::LightRed,
+                rgb: rgb(255, 69, 0),
                 alpha: 255,
             }),
             "lightgreen" => Ok(RinkColor {
-                color: Color::LightGreen,
+                rgb: rgb(144, 238, 144),
                 alpha: 255,
             }),
             "lightyellow" => Ok(RinkColor {
-                color: Color::LightYellow,
+                rgb: rgb(255, 255, 224),
                 alpha: 255,
             }),
             "lightblue" => Ok(RinkColor {
-                color: Color::LightBlue,
+                rgb: rgb(173, 216, 230),
                 alpha: 255,
             }),
             // light magenta does not exist
             "orchid" => Ok(RinkColor {
-                color: Color::LightMagenta,
+                rgb: rgb(218, 112, 214),
                 alpha: 255,
             }),
             "lightcyan" => Ok(RinkColor {
-                color: Color::LightCyan,
+                rgb: rgb(224, 255, 255),
                 alpha: 255,
             }),
             "white" => Ok(RinkColor {
-                color: Color::White,
+                rgb: rgb(225, 255, 255),
                 alpha: 255,
             }),
             _ => {
                 if color.len() == 7 && color.starts_with('#') {
                     parse_hex(color).map(|c| RinkColor {
-                        color: c,
+                        rgb: rgb_from_slice(c),
                         alpha: 255,
                     })
                 } else if let Some(stripped) = color.strip_prefix("rgb(") {
@@ -222,13 +193,16 @@ impl FromStr for RinkColor {
                         let (alpha, rgb_values) =
                             color_values.rsplit_once(',').ok_or(ParseColorError)?;
                         if let Ok(a) = alpha.parse() {
-                            parse_rgb(rgb_values).map(|c| RinkColor { color: c, alpha: a })
+                            parse_rgb(rgb_values).map(|c| RinkColor {
+                                rgb: rgb_from_slice(c),
+                                alpha: a,
+                            })
                         } else {
                             Err(ParseColorError)
                         }
                     } else {
                         parse_rgb(color_values).map(|c| RinkColor {
-                            color: c,
+                            rgb: rgb_from_slice(c),
                             alpha: 255,
                         })
                     }
@@ -239,15 +213,15 @@ impl FromStr for RinkColor {
                             color_values.rsplit_once(',').ok_or(ParseColorError)?;
                         if let Ok(a) = parse_value(alpha, 1.0, 1.0) {
                             parse_rgb(rgb_values).map(|c| RinkColor {
-                                color: c,
-                                alpha: (a * 255.0) as u8,
+                                rgb: rgb_from_slice(c),
+                                alpha: (a * 255.0) as u16,
                             })
                         } else {
                             Err(ParseColorError)
                         }
                     } else {
                         parse_rgb(color_values).map(|c| RinkColor {
-                            color: c,
+                            rgb: rgb_from_slice(c),
                             alpha: 255,
                         })
                     }
@@ -258,15 +232,15 @@ impl FromStr for RinkColor {
                             color_values.rsplit_once(',').ok_or(ParseColorError)?;
                         if let Ok(a) = parse_value(alpha, 1.0, 1.0) {
                             parse_hsl(rgb_values).map(|c| RinkColor {
-                                color: c,
-                                alpha: (a * 255.0) as u8,
+                                rgb: rgb_from_slice(c),
+                                alpha: (a * 255.0) as u16,
                             })
                         } else {
                             Err(ParseColorError)
                         }
                     } else {
                         parse_hsl(color_values).map(|c| RinkColor {
-                            color: c,
+                            rgb: rgb_from_slice(c),
                             alpha: 255,
                         })
                     }
@@ -277,15 +251,15 @@ impl FromStr for RinkColor {
                             color_values.rsplit_once(',').ok_or(ParseColorError)?;
                         if let Ok(a) = parse_value(alpha, 1.0, 1.0) {
                             parse_hsl(rgb_values).map(|c| RinkColor {
-                                color: c,
-                                alpha: (a * 255.0) as u8,
+                                rgb: rgb_from_slice(c),
+                                alpha: (a * 255.0) as u16,
                             })
                         } else {
                             Err(ParseColorError)
                         }
                     } else {
                         parse_hsl(color_values).map(|c| RinkColor {
-                            color: c,
+                            rgb: rgb_from_slice(c),
                             alpha: 255,
                         })
                     }
@@ -297,77 +271,94 @@ impl FromStr for RinkColor {
     }
 }
 
-fn to_rgb(c: Color) -> [u8; 3] {
+const fn to_rgb(c: Color) -> u16x4 {
     match c {
-        Color::Black => [0, 0, 0],
-        Color::Red => [255, 0, 0],
-        Color::Green => [0, 128, 0],
-        Color::Yellow => [255, 255, 0],
-        Color::Blue => [0, 0, 255],
-        Color::Magenta => [255, 0, 255],
-        Color::Cyan => [0, 255, 255],
-        Color::Gray => [128, 128, 128],
-        Color::DarkGray => [169, 169, 169],
-        Color::LightRed => [255, 69, 0],
-        Color::LightGreen => [144, 238, 144],
-        Color::LightYellow => [255, 255, 224],
-        Color::LightBlue => [173, 216, 230],
-        Color::LightMagenta => [218, 112, 214],
-        Color::LightCyan => [224, 255, 255],
-        Color::White => [255, 255, 255],
-        Color::Rgb(r, g, b) => [r, g, b],
-        Color::Indexed(idx) => match idx {
+        Color::Black => rgb(0, 0, 0),
+        Color::DarkRed => rgb(255, 0, 0),
+        Color::DarkGreen => rgb(0, 128, 0),
+        Color::DarkYellow => rgb(255, 255, 0),
+        Color::DarkBlue => rgb(0, 0, 255),
+        Color::DarkMagenta => rgb(255, 0, 255),
+        Color::DarkCyan => rgb(0, 255, 255),
+        Color::DarkGrey => rgb(169, 169, 169),
+        Color::Grey => rgb(128, 128, 128),
+        Color::Red => rgb(255, 69, 0),
+        Color::Green => rgb(144, 238, 144),
+        Color::Yellow => rgb(255, 255, 224),
+        Color::Blue => rgb(173, 216, 230),
+        Color::Magenta => rgb(218, 112, 214),
+        Color::Cyan => rgb(224, 255, 255),
+        Color::White => rgb(255, 255, 255),
+        Color::Rgb { r, g, b } => rgb(r as u16, g as u16, b as u16),
+        Color::AnsiValue(idx) => match idx {
             16..=231 => {
                 let v = idx - 16;
                 // add 3 to round up
                 let r = ((v as u16 / 36) * 255 + 3) / 5;
                 let g = (((v as u16 % 36) / 6) * 255 + 3) / 5;
                 let b = ((v as u16 % 6) * 255 + 3) / 5;
-                [r as u8, g as u8, b as u8]
+                rgb(r, g, b)
             }
             232..=255 => {
                 let l = (idx - 232) / 24;
-                [l; 3]
+                u16x4::splat(l as u16)
             }
             // rink will never generate these colors, but they might be on the screen from another program
-            _ => [0, 0, 0],
+            _ => rgb(0, 0, 0),
         },
-        Color::Reset => [0, 0, 0],
+        Color::Reset => rgb(0, 0, 0),
     }
 }
 
-pub fn convert(mode: RenderingMode, c: Color) -> Color {
-    if let Color::Reset = c {
-        c
-    } else {
-        match mode {
-            crate::RenderingMode::BaseColors => match c {
-                Color::Rgb(_, _, _) => panic!("cannot convert rgb color to base color"),
-                Color::Indexed(_) => panic!("cannot convert Ansi color to base color"),
-                _ => c,
-            },
-            crate::RenderingMode::Rgb => {
-                let rgb = to_rgb(c);
-                Color::Rgb(rgb[0], rgb[1], rgb[2])
+pub fn convert(mode: RenderingMode, c: u16x4) -> Color {
+    match mode {
+        crate::RenderingMode::BaseColors => {
+            const COLORS: [(Color, u16x4); 16] = [
+                (Color::Black, to_rgb(Color::Black)),
+                (Color::DarkRed, to_rgb(Color::DarkRed)),
+                (Color::DarkGreen, to_rgb(Color::DarkGreen)),
+                (Color::DarkYellow, to_rgb(Color::DarkYellow)),
+                (Color::DarkBlue, to_rgb(Color::DarkBlue)),
+                (Color::DarkMagenta, to_rgb(Color::DarkMagenta)),
+                (Color::DarkCyan, to_rgb(Color::DarkCyan)),
+                (Color::DarkGrey, to_rgb(Color::DarkGrey)),
+                (Color::Grey, to_rgb(Color::Grey)),
+                (Color::Red, to_rgb(Color::Red)),
+                (Color::Green, to_rgb(Color::Green)),
+                (Color::Yellow, to_rgb(Color::Yellow)),
+                (Color::Blue, to_rgb(Color::Blue)),
+                (Color::Magenta, to_rgb(Color::Magenta)),
+                (Color::Cyan, to_rgb(Color::Cyan)),
+                (Color::White, to_rgb(Color::White)),
+            ];
+
+            // find the closest color based on the manhattan distance
+            COLORS
+                .iter()
+                .min_by_key(|(_, rgb)| (c.max(*rgb) - c.min(*rgb)).wrapping_sum())
+                .unwrap()
+                .0
+        }
+        crate::RenderingMode::Rgb => {
+            let mut rgb = [0; 4];
+            c.write_to_slice_unaligned(&mut rgb);
+            Color::Rgb {
+                r: rgb[0] as u8,
+                g: rgb[1] as u8,
+                b: rgb[2] as u8,
             }
-            crate::RenderingMode::Ansi => match c {
-                Color::Indexed(_) => c,
-                _ => {
-                    let rgb = to_rgb(c);
-                    // 16-231: 6 × 6 × 6 color cube
-                    // 232-255: 23 step grayscale
-                    if rgb[0] == rgb[1] && rgb[1] == rgb[2] {
-                        let idx = 232 + (rgb[0] as u16 * 23 / 255) as u8;
-                        Color::Indexed(idx)
-                    } else {
-                        let r = (rgb[0] as u16 * 5) / 255;
-                        let g = (rgb[1] as u16 * 5) / 255;
-                        let b = (rgb[2] as u16 * 5) / 255;
-                        let idx = 16 + r * 36 + g * 6 + b;
-                        Color::Indexed(idx as u8)
-                    }
-                }
-            },
+        }
+        crate::RenderingMode::Ansi => {
+            // 16-231: 6 × 6 × 6 color cube
+            // 232-255: 23 step grayscale
+            if c.extract(0) == c.extract(1) && c.extract(1) == c.extract(2) {
+                let idx = 232 + (c.extract(0) * 23 / 255) as u8;
+                Color::AnsiValue(idx)
+            } else {
+                let rgb = ((c * 5) / 255) * u16x4::new(36, 6, 1, 0);
+                let idx = 16 + rgb.wrapping_sum();
+                Color::AnsiValue(idx as u8)
+            }
         }
     }
 }
@@ -375,12 +366,13 @@ pub fn convert(mode: RenderingMode, c: Color) -> Color {
 #[test]
 fn rgb_to_ansi() {
     for idx in 17..=231 {
-        let idxed = Color::Indexed(idx);
-        let rgb = to_rgb(idxed);
+        let idxed = Color::AnsiValue(idx);
+        let packed = to_rgb(idxed);
+        let mut rgb = [0; 4];
+        packed.write_to_slice_unaligned(&mut rgb);
+        let converted = convert(RenderingMode::Ansi, packed);
         // gray scale colors have two equivelent repersentations
-        let color = Color::Rgb(rgb[0], rgb[1], rgb[2]);
-        let converted = convert(RenderingMode::Ansi, color);
-        if let Color::Indexed(i) = converted {
+        if let Color::AnsiValue(i) = converted {
             if rgb[0] != rgb[1] || rgb[1] != rgb[2] {
                 assert_eq!(idxed, converted);
             } else {
@@ -391,8 +383,10 @@ fn rgb_to_ansi() {
         }
     }
     for idx in 232..=255 {
-        let idxed = Color::Indexed(idx);
-        let rgb = to_rgb(idxed);
+        let idxed = Color::AnsiValue(idx);
+        let packed = to_rgb(idxed);
+        let mut rgb = [0; 4];
+        packed.write_to_slice_unaligned(&mut rgb);
         assert!(rgb[0] == rgb[1] && rgb[1] == rgb[2]);
     }
 }
@@ -401,51 +395,44 @@ fn rgb_to_ansi() {
 pub struct RinkStyle {
     pub fg: Option<RinkColor>,
     pub bg: Option<RinkColor>,
-    pub add_modifier: Modifier,
-    pub sub_modifier: Modifier,
+    pub attributes: Attributes,
 }
 
 impl Default for RinkStyle {
     fn default() -> Self {
         Self {
             fg: Some(RinkColor {
-                color: Color::White,
+                rgb: rgb(255, 255, 255),
                 alpha: 255,
             }),
             bg: None,
-            add_modifier: Modifier::empty(),
-            sub_modifier: Modifier::empty(),
+            attributes: Attributes::default(),
         }
     }
 }
 
 impl RinkStyle {
-    pub fn add_modifier(mut self, m: Modifier) -> Self {
-        self.sub_modifier.remove(m);
-        self.add_modifier.insert(m);
-        self
-    }
-
-    pub fn remove_modifier(mut self, m: Modifier) -> Self {
-        self.add_modifier.remove(m);
-        self.sub_modifier.insert(m);
-        self
-    }
-
     pub fn merge(mut self, other: RinkStyle) -> Self {
         self.fg = self.fg.or(other.fg);
-        self.add_modifier(other.add_modifier)
-            .remove_modifier(other.sub_modifier)
+        self.attributes.extend(other.attributes);
+        self
+    }
+
+    pub fn add_attribute(mut self, attr: Attribute) -> Self {
+        self.attributes.set(attr);
+        self
+    }
+
+    pub fn remove_attribute(mut self, attr: Attribute) -> Self {
+        self.attributes.unset(attr);
+        self
     }
 }
 
-impl From<RinkStyle> for Style {
-    fn from(val: RinkStyle) -> Self {
-        Style {
-            fg: val.fg.map(|c| c.color),
-            bg: val.bg.map(|c| c.color),
-            add_modifier: val.add_modifier,
-            sub_modifier: val.sub_modifier,
-        }
-    }
+pub(crate) const fn rgb(r: u16, g: u16, b: u16) -> packed_simd::u16x4 {
+    packed_simd::u16x4::new(r, g, b, 0)
+}
+
+pub(crate) fn rgb_from_slice(rgb: [u8; 3]) -> packed_simd::u16x4 {
+    packed_simd::u16x4::new(rgb[0] as u16, rgb[1] as u16, rgb[2] as u16, 0)
 }

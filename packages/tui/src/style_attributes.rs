@@ -37,10 +37,13 @@ use dioxus_native_core::{
 };
 use dioxus_native_core_macro::sorted_str_slice;
 
-use crate::style::{RinkColor, RinkStyle};
+use crate::{
+    border_set::{Set, DOUBLE, NORMAL},
+    style::{RinkColor, RinkStyle},
+};
 
 #[derive(Default, Clone, PartialEq, Debug)]
-pub struct StyleModifier {
+pub(crate) struct StyleModifier {
     pub core: RinkStyle,
     pub modifier: TuiModifier,
 }
@@ -100,12 +103,12 @@ impl ParentDepState for StyleModifier {
 }
 
 #[derive(Default, Clone, PartialEq, Debug)]
-pub struct TuiModifier {
+pub(crate) struct TuiModifier {
     pub borders: Borders,
 }
 
 #[derive(Default, Clone, PartialEq, Debug)]
-pub struct Borders {
+pub(crate) struct Borders {
     pub top: BorderEdge,
     pub right: BorderEdge,
     pub bottom: BorderEdge,
@@ -124,7 +127,7 @@ impl Borders {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-pub struct BorderEdge {
+pub(crate) struct BorderEdge {
     pub color: Option<RinkColor>,
     pub style: BorderStyle,
     pub width: UnitSystem,
@@ -143,7 +146,7 @@ impl Default for BorderEdge {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum BorderStyle {
+pub(crate) enum BorderStyle {
     Dotted,
     Dashed,
     Solid,
@@ -157,8 +160,7 @@ pub enum BorderStyle {
 }
 
 impl BorderStyle {
-    pub fn symbol_set(&self) -> Option<tui::symbols::line::Set> {
-        use tui::symbols::line::*;
+    pub fn symbol_set(&self) -> Option<Set> {
         const DASHED: Set = Set {
             horizontal: "╌",
             vertical: "╎",
@@ -185,7 +187,7 @@ impl BorderStyle {
 }
 
 /// applies the entire html namespace defined in dioxus-html
-pub fn apply_style_attributes(
+pub(crate) fn apply_style_attributes(
     //
     name: &str,
     value: &str,
@@ -540,7 +542,6 @@ fn apply_animation(name: &str, _value: &str, _style: &mut StyleModifier) {
 }
 
 fn apply_font(name: &str, value: &str, style: &mut StyleModifier) {
-    use tui::style::Modifier;
     match name {
         "font" => (),
         "font-family" => (),
@@ -548,14 +549,26 @@ fn apply_font(name: &str, value: &str, style: &mut StyleModifier) {
         "font-size-adjust" => (),
         "font-stretch" => (),
         "font-style" => match value {
-            "italic" => style.core = style.core.add_modifier(Modifier::ITALIC),
-            "oblique" => style.core = style.core.add_modifier(Modifier::ITALIC),
+            "italic" => {
+                style.core = style
+                    .core
+                    .add_attribute(crossterm::style::Attribute::Italic)
+            }
+            "oblique" => {
+                style.core = style
+                    .core
+                    .add_attribute(crossterm::style::Attribute::Italic)
+            }
             _ => (),
         },
         "font-variant" => todo!(),
         "font-weight" => match value {
-            "bold" => style.core = style.core.add_modifier(Modifier::BOLD),
-            "normal" => style.core = style.core.remove_modifier(Modifier::BOLD),
+            "bold" => style.core = style.core.add_attribute(crossterm::style::Attribute::Bold),
+            "normal" => {
+                style.core = style
+                    .core
+                    .remove_attribute(crossterm::style::Attribute::Bold)
+            }
             _ => (),
         },
         _ => (),
@@ -563,16 +576,22 @@ fn apply_font(name: &str, value: &str, style: &mut StyleModifier) {
 }
 
 fn apply_text(name: &str, value: &str, style: &mut StyleModifier) {
-    use tui::style::Modifier;
-
     match name {
         "text-align" => todo!(),
         "text-align-last" => todo!(),
         "text-decoration" | "text-decoration-line" => {
             for v in value.split(' ') {
                 match v {
-                    "line-through" => style.core = style.core.add_modifier(Modifier::CROSSED_OUT),
-                    "underline" => style.core = style.core.add_modifier(Modifier::UNDERLINED),
+                    "line-through" => {
+                        style.core = style
+                            .core
+                            .add_attribute(crossterm::style::Attribute::CrossedOut)
+                    }
+                    "underline" => {
+                        style.core = style
+                            .core
+                            .add_attribute(crossterm::style::Attribute::Underlined)
+                    }
                     _ => (),
                 }
             }

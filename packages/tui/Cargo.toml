@@ -18,7 +18,6 @@ dioxus-html = { path = "../html", version = "^0.2.1" }
 dioxus-native-core = { path = "../native-core", version = "^0.2.0" }
 dioxus-native-core-macro = { path = "../native-core-macro", version = "^0.2.0" }
 
-tui = "0.17.0"
 crossterm = "0.23.0"
 anyhow = "1.0.42"
 tokio = { version = "1.15.0", features = ["full"] }
@@ -27,3 +26,5 @@ stretch2 = "0.4.2"
 smallvec = "1.6"
 fxhash = "0.2"
 anymap = "0.12.1"
+packed_simd = { version = "0.3.6", package = "packed_simd_2" }
+euclid = "0.22.7"

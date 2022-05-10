@@ -1,30 +1,30 @@
 use dioxus_native_core::layout_attributes::UnitSystem;
-use std::io::Stdout;
+use dioxus_native_core::real_dom::NodeType;
+use euclid::{Box2D, Point2D, Rect, Size2D};
 use stretch2::{
     geometry::Point,
     prelude::{Layout, Size},
     Stretch,
 };
-use tui::{backend::CrosstermBackend, layout::Rect};
 
 use crate::{
+    border_set::Set,
     style::{RinkColor, RinkStyle},
     style_attributes::{BorderEdge, BorderStyle},
-    widget::{RinkBuffer, RinkCell, RinkWidget, WidgetWithContext},
+    terminal::RegionMask,
+    widget::RinkWidget,
     Config, Dom, Node,
 };
 
 const RADIUS_MULTIPLIER: [f32; 2] = [1.0, 0.5];
 
 pub(crate) fn render_vnode(
-    frame: &mut tui::Frame<CrosstermBackend<Stdout>>,
+    region: &mut RegionMask,
     layout: &Stretch,
     rdom: &Dom,
     node: &Node,
     cfg: Config,
 ) {
-    use dioxus_native_core::real_dom::NodeType;
-
     if let NodeType::Placeholder = &node.node_type {
         return;
     }
@@ -33,6 +33,15 @@ pub(crate) fn render_vnode(
 
     let Point { x, y } = location;
     let Size { width, height } = size;
+    {
+        let start = Point2D::new(*x as u16, *y as u16);
+        if !region.intersects(&Box2D::new(
+            start,
+            start + Size2D::new(*width as u16, *height as u16),
+        )) {
+            return;
+        }
+    }
 
     match &node.node_type {
         NodeType::Text { text } => {
@@ -43,12 +52,20 @@ pub(crate) fn render_vnode(
             }
 
             impl<'a> RinkWidget for Label<'a> {
-                fn render(self, area: Rect, mut buf: RinkBuffer) {
+                fn render(self, area: Rect<u16, u16>, buf: &mut RegionMask) {
                     for (i, c) in self.text.char_indices() {
-                        let mut new_cell = RinkCell::default();
-                        new_cell.set_style(self.style);
-                        new_cell.symbol = c.to_string();
-                        buf.set(area.left() + i as u16, area.top(), new_cell);
+                        if let Some(cell) =
+                            buf.get_mut(Point2D::new(area.min_x() + i as u16, area.min_y()))
+                        {
+                            cell.set_symbol(c.to_string());
+                            if let Some(color) = self.style.bg {
+                                cell.set_bg_color(color);
+                            }
+                            if let Some(color) = self.style.fg {
+                                cell.set_fg_color(color);
+                            }
+                            cell.set_attributes(self.style.attributes);
+                        }
                     }
                 }
             }
@@ -57,23 +74,29 @@ pub(crate) fn render_vnode(
                 text,
                 style: node.state.style.core,
             };
-            let area = Rect::new(*x as u16, *y as u16, *width as u16, *height as u16);
+            let area = Rect::new(
+                Point2D::new(*x as u16, *y as u16),
+                Size2D::new(*width as u16, *height as u16),
+            );
 
             // the renderer will panic if a node is rendered out of range even if the size is zero
-            if area.width > 0 && area.height > 0 {
-                frame.render_widget(WidgetWithContext::new(label, cfg), area);
+            if area.width() > 0 && area.height() > 0 {
+                label.render(area, region);
             }
         }
         NodeType::Element { children, .. } => {
-            let area = Rect::new(*x as u16, *y as u16, *width as u16, *height as u16);
+            let area = Rect::new(
+                Point2D::new(*x as u16, *y as u16),
+                Size2D::new(*width as u16, *height as u16),
+            );
 
             // the renderer will panic if a node is rendered out of range even if the size is zero
-            if area.width > 0 && area.height > 0 {
-                frame.render_widget(WidgetWithContext::new(node, cfg), area);
+            if area.width() > 0 && area.height() > 0 {
+                node.render(area, region);
             }
 
             for c in children {
-                render_vnode(frame, layout, rdom, &rdom[c.0], cfg);
+                render_vnode(region, layout, rdom, &rdom[c.0], cfg);
             }
         }
         NodeType::Placeholder => unreachable!(),
@@ -81,9 +104,7 @@ pub(crate) fn render_vnode(
 }
 
 impl RinkWidget for &Node {
-    fn render(self, area: Rect, mut buf: RinkBuffer<'_>) {
-        use tui::symbols::line::*;
-
+    fn render(self, area: Rect<u16, u16>, mut buf: &mut RegionMask<'_>) {
         enum Direction {
             Left,
             Right,
@@ -92,7 +113,7 @@ impl RinkWidget for &Node {
         }
 
         fn draw(
-            buf: &mut RinkBuffer,
+            buf: &mut RegionMask<'_>,
             points_history: [[i32; 2]; 3],
             symbols: &Set,
             pos: [u16; 2],
@@ -124,34 +145,35 @@ impl RinkWidget for &Node {
                 }
             };
 
-            let mut new_cell = RinkCell::default();
-            if let Some(c) = color {
-                new_cell.fg = *c;
-            }
-            new_cell.symbol = match [start_dir, end_dir] {
-                [Direction::Down, Direction::Up] => symbols.vertical,
-                [Direction::Down, Direction::Right] => symbols.top_left,
-                [Direction::Down, Direction::Left] => symbols.top_right,
-                [Direction::Up, Direction::Down] => symbols.vertical,
-                [Direction::Up, Direction::Right] => symbols.bottom_left,
-                [Direction::Up, Direction::Left] => symbols.bottom_right,
-                [Direction::Right, Direction::Left] => symbols.horizontal,
-                [Direction::Right, Direction::Up] => symbols.bottom_left,
-                [Direction::Right, Direction::Down] => symbols.top_left,
-                [Direction::Left, Direction::Up] => symbols.bottom_right,
-                [Direction::Left, Direction::Right] => symbols.horizontal,
-                [Direction::Left, Direction::Down] => symbols.top_right,
-                _ => panic!(
-                    "{:?} {:?} {:?} cannont connect cell to itself",
-                    before, current, after
-                ),
-            }
-            .to_string();
-            buf.set(
+            if let Some(cell) = buf.get_mut(Point2D::new(
                 (current[0] + pos[0] as i32) as u16,
                 (current[1] + pos[1] as i32) as u16,
-                new_cell,
-            );
+            )) {
+                if let Some(c) = color {
+                    cell.set_fg_color(*c);
+                }
+                cell.set_symbol(
+                    match [start_dir, end_dir] {
+                        [Direction::Down, Direction::Up] => symbols.vertical,
+                        [Direction::Down, Direction::Right] => symbols.top_left,
+                        [Direction::Down, Direction::Left] => symbols.top_right,
+                        [Direction::Up, Direction::Down] => symbols.vertical,
+                        [Direction::Up, Direction::Right] => symbols.bottom_left,
+                        [Direction::Up, Direction::Left] => symbols.bottom_right,
+                        [Direction::Right, Direction::Left] => symbols.horizontal,
+                        [Direction::Right, Direction::Up] => symbols.bottom_left,
+                        [Direction::Right, Direction::Down] => symbols.top_left,
+                        [Direction::Left, Direction::Up] => symbols.bottom_right,
+                        [Direction::Left, Direction::Right] => symbols.horizontal,
+                        [Direction::Left, Direction::Down] => symbols.top_right,
+                        _ => panic!(
+                            "{:?} {:?} {:?} cannont connect cell to itself",
+                            before, current, after
+                        ),
+                    }
+                    .to_string(),
+                );
+            }
         }
 
         fn draw_arc(
@@ -160,7 +182,7 @@ impl RinkWidget for &Node {
             arc_angle: f32,
             radius: f32,
             symbols: &Set,
-            buf: &mut RinkBuffer,
+            buf: &mut RegionMask<'_>,
             color: &Option<RinkColor>,
         ) {
             if radius < 0.0 {
@@ -242,32 +264,32 @@ impl RinkWidget for &Node {
             draw(buf, points_history, symbols, pos, color);
         }
 
-        fn get_radius(border: &BorderEdge, area: Rect) -> f32 {
+        fn get_radius(border: &BorderEdge, area: Rect<u16, u16>) -> f32 {
             match border.style {
                 BorderStyle::Hidden => 0.0,
                 BorderStyle::None => 0.0,
                 _ => match border.radius {
-                    UnitSystem::Percent(p) => p * area.width as f32 / 100.0,
+                    UnitSystem::Percent(p) => p * area.width() as f32 / 100.0,
                     UnitSystem::Point(p) => p,
                 }
                 .abs()
-                .min((area.width as f32 / RADIUS_MULTIPLIER[0]) / 2.0)
-                .min((area.height as f32 / RADIUS_MULTIPLIER[1]) / 2.0),
+                .min((area.width() as f32 / RADIUS_MULTIPLIER[0]) / 2.0)
+                .min((area.height() as f32 / RADIUS_MULTIPLIER[1]) / 2.0),
             }
         }
 
-        if area.area() == 0 {
+        if area.is_empty() {
             return;
         }
 
         // todo: only render inside borders
-        for x in area.left()..area.right() {
-            for y in area.top()..area.bottom() {
-                let mut new_cell = RinkCell::default();
-                if let Some(c) = self.state.style.core.bg {
-                    new_cell.bg = c;
+        for x in area.min_x()..area.max_x() {
+            for y in area.min_y()..area.max_y() {
+                if let Some(cell) = buf.get_mut(Point2D::new(x, y)) {
+                    if let Some(c) = self.state.style.core.bg {
+                        cell.set_bg_color(c);
+                    }
                 }
-                buf.set(x, y, new_cell);
             }
         }
 
@@ -289,16 +311,16 @@ impl RinkWidget for &Node {
                 (last_r * RADIUS_MULTIPLIER[1]) as u16,
             ];
             let color = current_edge.color.or(self.state.style.core.fg);
-            let mut new_cell = RinkCell::default();
-            if let Some(c) = color {
-                new_cell.fg = c;
-            }
-            for x in (area.left() + last_radius[0] + 1)..(area.right() - radius[0]) {
-                new_cell.symbol = symbols.horizontal.to_string();
-                buf.set(x, area.top(), new_cell.clone());
+            for x in (area.min_x() + last_radius[0] + 1)..(area.max_x() - radius[0]) {
+                if let Some(cell) = buf.get_mut(Point2D::new(x, area.min_y())) {
+                    cell.set_symbol(symbols.horizontal.to_string());
+                    if let Some(c) = color {
+                        cell.set_fg_color(c);
+                    }
+                }
             }
             draw_arc(
-                [area.right() - radius[0] - 1, area.top() + radius[1]],
+                [area.max_x() - radius[0] - 1, area.min_y() + radius[1]],
                 std::f32::consts::FRAC_PI_2 * 3.0,
                 std::f32::consts::FRAC_PI_2,
                 r,
@@ -324,16 +346,16 @@ impl RinkWidget for &Node {
                 (last_r * RADIUS_MULTIPLIER[1]) as u16,
             ];
             let color = current_edge.color.or(self.state.style.core.fg);
-            let mut new_cell = RinkCell::default();
-            if let Some(c) = color {
-                new_cell.fg = c;
-            }
-            for y in (area.top() + last_radius[1] + 1)..(area.bottom() - radius[1]) {
-                new_cell.symbol = symbols.vertical.to_string();
-                buf.set(area.right() - 1, y, new_cell.clone());
+            for y in (area.min_y() + last_radius[1] + 1)..(area.max_y() - radius[1]) {
+                if let Some(cell) = buf.get_mut(Point2D::new(area.max_x() - 1, y)) {
+                    cell.set_symbol(symbols.vertical.to_string());
+                    if let Some(c) = color {
+                        cell.set_fg_color(c);
+                    }
+                }
             }
             draw_arc(
-                [area.right() - radius[0] - 1, area.bottom() - radius[1] - 1],
+                [area.max_x() - radius[0] - 1, area.max_y() - radius[1] - 1],
                 0.0,
                 std::f32::consts::FRAC_PI_2,
                 r,
@@ -359,16 +381,16 @@ impl RinkWidget for &Node {
                 (last_r * RADIUS_MULTIPLIER[1]) as u16,
             ];
             let color = current_edge.color.or(self.state.style.core.fg);
-            let mut new_cell = RinkCell::default();
-            if let Some(c) = color {
-                new_cell.fg = c;
-            }
-            for x in (area.left() + radius[0])..(area.right() - last_radius[0] - 1) {
-                new_cell.symbol = symbols.horizontal.to_string();
-                buf.set(x, area.bottom() - 1, new_cell.clone());
+            for x in (area.min_x() + radius[0])..(area.max_x() - last_radius[0] - 1) {
+                if let Some(cell) = buf.get_mut(Point2D::new(x, area.max_y() - 1)) {
+                    cell.set_symbol(symbols.horizontal.to_string());
+                    if let Some(c) = color {
+                        cell.set_fg_color(c);
+                    }
+                }
             }
             draw_arc(
-                [area.left() + radius[0], area.bottom() - radius[1] - 1],
+                [area.min_x() + radius[0], area.max_y() - radius[1] - 1],
                 std::f32::consts::FRAC_PI_2,
                 std::f32::consts::FRAC_PI_2,
                 r,
@@ -394,16 +416,16 @@ impl RinkWidget for &Node {
                 (last_r * RADIUS_MULTIPLIER[1]) as u16,
             ];
             let color = current_edge.color.or(self.state.style.core.fg);
-            let mut new_cell = RinkCell::default();
-            if let Some(c) = color {
-                new_cell.fg = c;
-            }
-            for y in (area.top() + radius[1])..(area.bottom() - last_radius[1] - 1) {
-                new_cell.symbol = symbols.vertical.to_string();
-                buf.set(area.left(), y, new_cell.clone());
+            for y in (area.min_y() + radius[1])..(area.max_y() - last_radius[1] - 1) {
+                if let Some(cell) = buf.get_mut(Point2D::new(area.min_x(), y)) {
+                    cell.set_symbol(symbols.vertical.to_string());
+                    if let Some(c) = color {
+                        cell.set_fg_color(c);
+                    }
+                }
             }
             draw_arc(
-                [area.left() + radius[0], area.top() + radius[1]],
+                [area.min_x() + radius[0], area.min_y() + radius[1]],
                 std::f32::consts::PI,
                 std::f32::consts::FRAC_PI_2,
                 r,
