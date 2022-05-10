@@ -2,33 +2,16 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use dioxus::prelude::*;
 use dioxus_tui::{Config, TuiContext};
 
-criterion_group!(mbenches, tui_update);
-criterion_main!(mbenches);
-
-/// This benchmarks the cache performance of the TUI for small edits by changing one box at a time.
-fn tui_update(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Update boxes");
-
-    // We can also use loops to define multiple benchmarks, even over multiple dimensions.
-    for size in 1..=8u32 {
-        let parameter_string = format!("{}", (3 * size).pow(2));
-        group.bench_with_input(
-            BenchmarkId::new("size", parameter_string),
-            &size,
-            |b, size| {
-                b.iter(|| match size {
-                    1 => dioxus::tui::launch_cfg(app3, Config::default()),
-                    2 => dioxus::tui::launch_cfg(app6, Config::default()),
-                    3 => dioxus::tui::launch_cfg(app9, Config::default()),
-                    4 => dioxus::tui::launch_cfg(app12, Config::default()),
-                    5 => dioxus::tui::launch_cfg(app15, Config::default()),
-                    6 => dioxus::tui::launch_cfg(app18, Config::default()),
-                    7 => dioxus::tui::launch_cfg(app21, Config::default()),
-                    8 => dioxus::tui::launch_cfg(app24, Config::default()),
-                    _ => (),
-                })
-            },
-        );
+fn main() {
+    for _ in 0..100 {
+        dioxus::tui::launch_cfg(app3, Config::default());
+        dioxus::tui::launch_cfg(app6, Config::default());
+        dioxus::tui::launch_cfg(app9, Config::default());
+        dioxus::tui::launch_cfg(app12, Config::default());
+        dioxus::tui::launch_cfg(app15, Config::default());
+        dioxus::tui::launch_cfg(app18, Config::default());
+        dioxus::tui::launch_cfg(app21, Config::default());
+        dioxus::tui::launch_cfg(app24, Config::default());
     }
 }
 
@@ -54,7 +37,6 @@ fn Box(cx: Scope<BoxProps>) -> Element {
         let count = count.clone();
         let ctx = ctx.clone();
         async move {
-            tokio::time::sleep(std::time::Duration::from_millis(offset as u64)).await;
             if *count.get() + 1 >= (size * size) {
                 ctx.quit();
             } else {
@@ -88,6 +70,7 @@ struct GridProps {
 #[allow(non_snake_case)]
 fn Grid(cx: Scope<GridProps>) -> Element {
     let size = cx.props.size;
+    let count = use_state(&cx, || 0);
 
     cx.render(rsx! {
         div{

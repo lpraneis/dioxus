@@ -33,15 +33,14 @@ pub(crate) fn render_vnode(
 
     let Point { x, y } = location;
     let Size { width, height } = size;
-    {
+
+    let intersects = {
         let start = Point2D::new(*x as u16, *y as u16);
-        if !region.intersects(&Box2D::new(
+        region.intersects(&Box2D::new(
             start,
             start + Size2D::new(*width as u16, *height as u16),
-        )) {
-            return;
-        }
-    }
+        ))
+    };
 
     match &node.node_type {
         NodeType::Text { text } => {
@@ -57,7 +56,6 @@ pub(crate) fn render_vnode(
                         if let Some(cell) =
                             buf.get_mut(Point2D::new(area.min_x() + i as u16, area.min_y()))
                         {
-                            cell.set_symbol(c.to_string());
                             if let Some(color) = self.style.bg {
                                 cell.set_bg_color(color);
                             }
@@ -65,34 +63,39 @@ pub(crate) fn render_vnode(
                                 cell.set_fg_color(color);
                             }
                             cell.set_attributes(self.style.attributes);
+                            cell.set_symbol(c.to_string());
                         }
                     }
                 }
             }
 
-            let label = Label {
-                text,
-                style: node.state.style.core,
-            };
-            let area = Rect::new(
-                Point2D::new(*x as u16, *y as u16),
-                Size2D::new(*width as u16, *height as u16),
-            );
+            if intersects {
+                let label = Label {
+                    text,
+                    style: node.state.style.core,
+                };
+                let area = Rect::new(
+                    Point2D::new(*x as u16, *y as u16),
+                    Size2D::new(*width as u16, *height as u16),
+                );
 
-            // the renderer will panic if a node is rendered out of range even if the size is zero
-            if area.width() > 0 && area.height() > 0 {
-                label.render(area, region);
+                // the renderer will panic if a node is rendered out of range even if the size is zero
+                if area.width() > 0 && area.height() > 0 {
+                    label.render(area, region);
+                }
             }
         }
         NodeType::Element { children, .. } => {
-            let area = Rect::new(
-                Point2D::new(*x as u16, *y as u16),
-                Size2D::new(*width as u16, *height as u16),
-            );
+            if intersects {
+                let area = Rect::new(
+                    Point2D::new(*x as u16, *y as u16),
+                    Size2D::new(*width as u16, *height as u16),
+                );
 
-            // the renderer will panic if a node is rendered out of range even if the size is zero
-            if area.width() > 0 && area.height() > 0 {
-                node.render(area, region);
+                // the renderer will panic if a node is rendered out of range even if the size is zero
+                if area.width() > 0 && area.height() > 0 {
+                    node.render(area, region);
+                }
             }
 
             for c in children {

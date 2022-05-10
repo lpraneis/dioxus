@@ -2,9 +2,7 @@ use anyhow::Result;
 use anymap::AnyMap;
 use crossterm::{
     cursor::{Hide, Show},
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyModifiers,
-    },
+    event::{DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -18,12 +16,9 @@ use futures::{
     pin_mut, StreamExt,
 };
 use layout::StretchLayout;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
-use std::{
-    cell::RefCell,
-    sync::{Arc, Mutex},
-};
 use stretch2::{
     prelude::{Layout, Size},
     Stretch,
@@ -77,13 +72,6 @@ pub fn launch_cfg(app: Component<()>, cfg: Config) {
 
     let (handler, state, register_event) = RinkInputHandler::new();
 
-    let term = Arc::new(Mutex::new(if cfg.headless {
-        None
-    } else {
-        Some(Terminal::default())
-    }));
-    let weak_term = Arc::downgrade(&term);
-
     // Setup input handling
     let (event_tx, event_rx) = unbounded();
     let event_tx_clone = event_tx.clone();
@@ -93,15 +81,6 @@ pub fn launch_cfg(app: Component<()>, cfg: Config) {
             loop {
                 if crossterm::event::poll(tick_rate).unwrap() {
                     let evt = crossterm::event::read().unwrap();
-                    if let event::Event::Resize(w, h) = evt {
-                        if let Some(term) = weak_term.upgrade() {
-                            if let Some(term) = &mut *term.lock().unwrap() {
-                                term.resize(w, h);
-                            }
-                        } else {
-                            break;
-                        }
-                    }
                     if event_tx.unbounded_send(InputEvent::UserInput(evt)).is_err() {
                         break;
                     }
@@ -130,7 +109,6 @@ pub fn launch_cfg(app: Component<()>, cfg: Config) {
         rdom,
         stretch,
         register_event,
-        term,
     )
     .unwrap();
 }
@@ -143,13 +121,18 @@ fn render_vdom(
     mut rdom: Dom,
     stretch: Rc<RefCell<Stretch>>,
     mut register_event: impl FnMut(crossterm::event::Event),
-    term: Arc<Mutex<Option<Terminal>>>,
 ) -> Result<()> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
         .block_on(async {
-            if let Some(term) = &mut *term.lock().unwrap() {
+            let mut term = if cfg.headless {
+                None
+            } else {
+                Some(Terminal::default())
+            };
+
+            if let Some(term) = &mut term {
                 enable_raw_mode().unwrap();
                 execute!(term.out, EnterAlternateScreen, EnableMouseCapture, Hide).unwrap();
             }
@@ -185,21 +168,18 @@ fn render_vdom(
                             )
                             .unwrap();
                     }
-                    if let Some(terminal) = &mut *term.lock().unwrap() {
-                        // it is safe to resize while the terminal is locked
-                        resize(terminal.size(), &mut stretch.borrow_mut(), &rdom);
+                    if let Some(terminal) = &mut term {
                         let root = &rdom[0];
                         if resized {
-                            let dirty = [Box2D::new(
-                                Point2D::new(0, 0),
-                                Point2D::zero() + terminal.size(),
-                            )];
+                            let dirty = [Box2D::from_size(terminal.size())];
+                            resize(terminal.size(), &mut stretch.borrow_mut(), &rdom);
                             let mut mask = RegionMask::new(terminal, &dirty);
                             render::render_vnode(&mut mask, &stretch.borrow(), &rdom, root, cfg);
                             mask.commit(cfg.rendering_mode);
                         } else {
-                            let stretch = stretch.borrow_mut();
-                            let dirty: Vec<_> = to_rerender
+                            let mut stretch = stretch.borrow_mut();
+                            // clear the dirty elements
+                            let old_dirty: Vec<_> = to_rerender
                                 .iter()
                                 .map(|i| {
                                     let node = &rdom[*i];
@@ -212,11 +192,23 @@ fn render_vdom(
                                     Box2D::new(start, end)
                                 })
                                 .collect();
+                            resize(terminal.size(), &mut stretch, &rdom);
+                            let dirty: Vec<_> = to_rerender
+                                .iter()
+                                .map(|i| {
+                                    let node = &rdom[*i];
+                                    let Layout { location, size, .. } =
+                                        stretch.layout(node.state.layout.node.unwrap()).unwrap();
+                                    let start = Point2D::new(location.x as u16, location.y as u16);
+                                    let end =
+                                        start + Size2D::new(size.width as u16, size.height as u16);
+
+                                    Box2D::new(start, end)
+                                })
+                                .chain(old_dirty.into_iter())
+                                .collect();
+
                             let mut mask = RegionMask::new(terminal, &dirty);
-                            // for id in to_rerender.iter() {
-                            //     let node = &rdom[*id];
-                            //     render::render_vnode(&mut mask, &stretch, &rdom, node, cfg);
-                            // }
                             render::render_vnode(&mut mask, &stretch, &rdom, root, cfg);
                             mask.commit(cfg.rendering_mode);
                         }
@@ -246,7 +238,12 @@ fn render_vdom(
                                             break;
                                         }
                                     }
-                                    TermEvent::Resize(_, _) => resized = true,
+                                    TermEvent::Resize(width, height) => {
+                                        if let Some(term) = &mut term {
+                                            term.resize(*width, *height)
+                                        }
+                                        resized = true
+                                    }
                                     TermEvent::Mouse(_) => {}
                                 },
                                 InputEvent::Close => break,
@@ -274,7 +271,7 @@ fn render_vdom(
                 }
             }
 
-            if let Some(terminal) = &mut *term.lock().unwrap() {
+            if let Some(terminal) = &mut term {
                 disable_raw_mode()?;
                 execute!(
                     terminal.out,
