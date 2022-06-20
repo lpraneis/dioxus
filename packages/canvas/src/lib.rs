@@ -3,67 +3,166 @@ use dioxus_core::prelude::*;
 use dioxus_core_macro::*;
 use dioxus_hooks::*;
 use dioxus_html as dioxus_elements;
+use piet::kurbo::BezPath;
+use piet::kurbo::Circle;
+use piet::kurbo::Rect;
+use piet::kurbo::Shape;
+use piet::Color;
+use piet::PaintBrush;
+use piet::RenderContext;
+use std::future;
 use std::rc::Rc;
 use std::sync::Mutex;
-use std::time::Duration;
 use wasm_bindgen::JsCast;
 use web_sys::window;
 use web_sys::CanvasRenderingContext2d;
 use web_sys::HtmlCanvasElement;
 
+const TOLERANCE: f64 = 0.1;
+
+// each platform could export a Canvas
+pub mod web {
+    use super::*;
+
+    pub fn Canvas<'a>(cx: Scope<'a, CanvasProps<'a>>) -> Element<'a> {
+        GenericCanvas::<WebHandler>(cx)
+    }
+
+    pub fn Circle(cx: Scope<CircleProps>) -> Element<'_> {
+        log::info!("circle initialized");
+        GenericCircle::<WebHandler>(cx)
+    }
+}
+
 #[derive(Props)]
-struct CanvasProps<'a> {
+pub struct CanvasProps<'a> {
     children: Element<'a>,
 }
 
-fn Canvas<'a, C: CanvasHandler + 'static>(cx: Scope<'a, CanvasProps<'a>>) -> Element<'a> {
-    let canvas = use_ref(&cx, || None);
-    let id = cx.scope_id().0;
-    let lzy = C::create(id);
+pub fn GenericCanvas<'a, C: CanvasHandler + 'static>(
+    cx: Scope<'a, CanvasProps<'a>>,
+) -> Element<'a> {
+    let id = cx.scope_id();
+    let canvas: CanvasHandle<C> = cx.provide_context(CanvasHandle::new(id));
     let canvas_clone = canvas.clone();
-    use_future(&cx, (), |_| async move {
+    use_future(&cx, (), move |_| async move {
         // futures will not be polled until after the first render in the web renderer...
-        tokio::time::sleep(Duration::from_millis(0)).await;
-        canvas_clone.set(Some(C::onmount(id)));
-        cx.provide_context(CanvasHandle::new());
+        future::ready(()).await;
+        canvas_clone.onmount(id);
+        log::info!("Canvas {} initialized", id.0);
     });
-    // wait to render children until after the canvas is mounted
-
-    if let Some(lzy) = lzy {
-        cx.render(lzy)
-    } else {
-        None
-    }
+    cx.render(rsx! {
+        {
+            [
+                &C::create(id).map(|lzy| cx.render(lzy)).flatten(),
+            ]
+        }
+        {
+            [
+                &cx.props.children
+            ]
+        }
+    })
 }
 
 /// A handle to the canvas
 pub struct CanvasHandle<C: CanvasHandler>(Rc<Mutex<Canvas<C>>>);
 
+impl<C: CanvasHandler> Clone for CanvasHandle<C> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 impl<C: CanvasHandler> CanvasHandle<C> {
-    fn new(id: usize, handler: C) {
-        let canvas = Canvas::new(id, handler);
-        let canvas_rc = Rc::new(Mutex::new(canvas));
+    fn new(id: ScopeId) -> Self {
+        let canvas = Canvas::new(id);
+        Self(Rc::new(Mutex::new(canvas)))
+    }
+
+    fn onmount(&self, id: ScopeId) {
+        let mut canvas = self.0.lock().unwrap();
+        canvas.onmount(id);
+    }
+
+    fn draw(&self, shape: impl Shape, brush: impl Into<PaintBrush>, width: f64) {
+        let mut canvas = self.0.lock().unwrap();
+        canvas.push(CanvasCommand::Draw(
+            shape.into_path(TOLERANCE),
+            brush.into(),
+            width,
+        ));
+    }
+
+    fn clear(&self, rect: Rect, color: Color) {
+        let mut canvas = self.0.lock().unwrap();
+        canvas.push(CanvasCommand::Clear(rect, color));
     }
 }
 
 pub struct Canvas<C: CanvasHandler> {
-    id: usize,
+    key: ScopeId,
     lzy: Option<C>,
     command_queue: Vec<CanvasCommand>,
 }
 
-impl<C: CanvasHandler> Canvas<C> {}
+impl<C: CanvasHandler> Canvas<C> {
+    fn new(key: ScopeId) -> Canvas<C> {
+        Canvas {
+            key: key,
+            lzy: None,
+            command_queue: Vec::new(),
+        }
+    }
 
-enum CanvasCommand {}
+    fn push(&mut self, command: CanvasCommand) {
+        if let Some(c) = &mut self.lzy {
+            let draw = c.draw();
+            command.draw(draw);
+        } else {
+            log::info!("Creating {:?}", command);
+            self.command_queue.push(command);
+        }
+    }
 
-trait CanvasHandler {
+    fn onmount(&mut self, id: ScopeId) {
+        let mut new = C::onmount(id);
+        // draw any queued commands
+        {
+            let draw = new.draw();
+            for cmd in self.command_queue.drain(..) {
+                cmd.draw(draw);
+            }
+        }
+        self.lzy = Some(new);
+    }
+}
+
+#[derive(Debug)]
+enum CanvasCommand {
+    Draw(BezPath, PaintBrush, f64),
+    Clear(Rect, Color),
+    // more commands here
+}
+
+impl CanvasCommand {
+    fn draw<R: RenderContext>(self, ctx: &mut R) {
+        log::info!("drawing: {:?}", self);
+        match self {
+            CanvasCommand::Draw(path, brush, width) => ctx.stroke(path, &brush, width),
+            CanvasCommand::Clear(rect, color) => ctx.clear(rect, color),
+        }
+    }
+}
+
+pub trait CanvasHandler {
     type RenderContext: piet::RenderContext;
 
-    fn create<'a, 'b>(id: usize) -> Option<LazyNodes<'a, 'b>>;
+    fn create<'a, 'b>(id: ScopeId) -> Option<LazyNodes<'a, 'b>>;
 
-    fn draw(&mut self, id: usize) -> &mut Self::RenderContext;
+    fn onmount(id: ScopeId) -> Self;
 
-    fn onmount(id: usize) -> Self;
+    fn draw(&mut self) -> &mut Self::RenderContext;
 
     // could add more methods here to handle filters, etc.
 }
@@ -75,20 +174,20 @@ struct WebHandler {
 impl CanvasHandler for WebHandler {
     type RenderContext = piet_web::WebRenderContext<'static>;
 
-    fn create<'b, 'c>(id: usize) -> Option<LazyNodes<'b, 'c>> {
+    fn create<'b, 'c>(id: ScopeId) -> Option<LazyNodes<'b, 'c>> {
         Some(rsx! {
             canvas{
-                id: "dioxus-canvas-{id}"
+                id: "dioxus-canvas-{id.0}"
             }
         })
     }
 
-    fn onmount(id: usize) -> WebHandler {
+    fn onmount(id: ScopeId) -> WebHandler {
         let window = window().unwrap();
         let canvas = window
             .document()
             .unwrap()
-            .get_element_by_id(&format!("dioxus-canvas-{}", id))
+            .get_element_by_id(&format!("dioxus-canvas-{}", id.0))
             .unwrap();
         let canvas_html: HtmlCanvasElement = canvas.dyn_into().unwrap();
         let context: CanvasRenderingContext2d = canvas_html
@@ -98,12 +197,32 @@ impl CanvasHandler for WebHandler {
             .dyn_into()
             .unwrap();
         let context = piet_web::WebRenderContext::new(context, window);
+        log::info!("Web Canvas {} initialized", id.0);
         Self {
             render_ctx: context,
         }
     }
 
-    fn draw(&mut self, id: usize) -> &mut Self::RenderContext {
+    fn draw(&mut self) -> &mut Self::RenderContext {
         &mut self.render_ctx
     }
+}
+
+// real elements would have some optional props here
+#[derive(Props, PartialEq)]
+pub struct CircleProps {
+    x: f64,
+    y: f64,
+    radius: f64,
+}
+
+pub fn GenericCircle<C: CanvasHandler + 'static>(cx: Scope<CircleProps>) -> Element {
+    let canvas: CanvasHandle<C> = cx.consume_context().unwrap();
+    let CircleProps { x, y, radius } = cx.props;
+    canvas.draw(
+        Circle::new((*x, *y), *radius),
+        PaintBrush::Color(Color::RED),
+        10.0,
+    );
+    None
 }
