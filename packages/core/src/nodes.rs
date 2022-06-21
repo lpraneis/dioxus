@@ -4,7 +4,9 @@
 //! cheap and *very* fast to construct - building a full tree should be quick.
 
 use crate::{
-    innerlude::{AttributeValue, ComponentPtr, Element, Properties, Scope, ScopeId, ScopeState},
+    innerlude::{
+        AttributeValue, ComponentPtr, Element, Properties, Scope, ScopeId, ScopeMap, ScopeState,
+    },
     lazynodes::LazyNodes,
     AnyEvent, Component,
 };
@@ -373,8 +375,24 @@ pub struct Listener<'bump> {
     pub(crate) callback: InternalHandler<'bump>,
 }
 
-pub type InternalHandler<'bump> = &'bump RefCell<Option<InternalListenerCallback<'bump>>>;
-type InternalListenerCallback<'bump> = BumpBox<'bump, dyn FnMut(AnyEvent) + 'bump>;
+pub type InternalHandler<'bump> = &'bump RefCell<Option<BorrowingListenerCallback<'bump>>>;
+
+/// A event listener that can contain refrences to the [`Hook`]s
+pub struct BorrowingListenerCallback<'bump> {
+    callback: BumpBox<'bump, dyn FnMut(AnyEvent) + 'bump>,
+}
+
+impl<'bump> BorrowingListenerCallback<'bump> {
+    /// Create a new [`BorrowingListenerCallback`]
+    pub fn new(callback: BumpBox<'bump, dyn FnMut(AnyEvent) + 'bump>) -> Self {
+        Self { callback }
+    }
+
+    /// Call the callback with the given event requiring mutable access to the state of the vdom scopes
+    pub(crate) fn call(&mut self, _: &mut ScopeMap, evt: AnyEvent) {
+        (self.callback)(evt)
+    }
+}
 
 type ExternalListenerCallback<'bump, T> = BumpBox<'bump, dyn FnMut(T) + 'bump>;
 

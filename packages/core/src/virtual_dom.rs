@@ -334,11 +334,14 @@ impl VirtualDom {
             if self.pending_messages.is_empty() {
                 if self.scopes.tasks.has_tasks() {
                     use futures_util::future::{select, Either};
+                    let Self {
+                        scopes, channel, ..
+                    } = self;
 
-                    let scopes = &mut self.scopes;
                     let task_poll = poll_fn(|cx| {
-                        let mut tasks = scopes.tasks.tasks.borrow_mut();
-                        tasks.retain(|_, task| task.as_mut().poll(cx).is_pending());
+                        let ScopeArena { scopes, tasks, .. } = scopes;
+                        let mut tasks = tasks.tasks.borrow_mut();
+                        tasks.retain(|_, task| task.write(scopes).as_mut().poll(cx).is_pending());
 
                         match tasks.is_empty() {
                             true => Poll::Ready(()),
@@ -346,7 +349,7 @@ impl VirtualDom {
                         }
                     });
 
-                    match select(task_poll, self.channel.1.next()).await {
+                    match select(task_poll, channel.1.next()).await {
                         Either::Left((_, _)) => {}
                         Either::Right((msg, _)) => self.pending_messages.push_front(msg.unwrap()),
                     }

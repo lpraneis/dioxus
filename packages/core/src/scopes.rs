@@ -1,4 +1,6 @@
-use crate::{innerlude::*, unsafe_utils::extend_vnode};
+use crate::{
+    borrowing_future::BorrowedFuture, hookref::Hook, innerlude::*, unsafe_utils::extend_vnode,
+};
 use bumpalo::Bump;
 use futures_channel::mpsc::UnboundedSender;
 use fxhash::FxHashMap;
@@ -9,7 +11,6 @@ use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     future::Future,
-    pin::Pin,
     rc::Rc,
     sync::Arc,
 };
@@ -23,6 +24,8 @@ pub(crate) struct Heuristic {
     node_arena_size: usize,
 }
 
+pub(crate) type ScopeMap = RefCell<FxHashMap<ScopeId, *mut ScopeState>>;
+
 // a slab-like arena with stable references even when new scopes are allocated
 // uses a bump arena as a backing
 //
@@ -30,7 +33,7 @@ pub(crate) struct Heuristic {
 pub(crate) struct ScopeArena {
     pub scope_gen: Cell<usize>,
     pub bump: Bump,
-    pub scopes: RefCell<FxHashMap<ScopeId, *mut ScopeState>>,
+    pub scopes: ScopeMap,
     pub heuristics: RefCell<FxHashMap<ComponentPtr, Heuristic>>,
     pub free_scopes: RefCell<Vec<*mut ScopeState>>,
     pub nodes: RefCell<Slab<*const VNode<'static>>>,
@@ -317,7 +320,7 @@ impl ScopeArena {
         scope.cycle_frame();
     }
 
-    pub fn call_listener_with_bubbling(&self, event: UserEvent, element: ElementId) {
+    pub fn call_listener_with_bubbling(&mut self, event: UserEvent, element: ElementId) {
         let nodes = self.nodes.borrow();
         let mut cur_el = Some(element);
 
@@ -344,10 +347,13 @@ impl ScopeArena {
                                 // we really want to convert arc to rc
                                 // unfortunately, the SchedulerMsg must be send/sync to be sent across threads
                                 // we could convert arc to rc internally or something
-                                (cb)(AnyEvent {
-                                    bubble_state: state.clone(),
-                                    data: event.data.clone(),
-                                });
+                                cb.call(
+                                    &mut self.scopes,
+                                    AnyEvent {
+                                        bubble_state: state.clone(),
+                                        data: event.data.clone(),
+                                    },
+                                );
                             }
                         }
                     }
@@ -833,20 +839,21 @@ impl ScopeState {
     #[allow(clippy::mut_from_ref)]
     pub fn use_hook<'src, State: 'static>(
         &'src self,
-        initializer: impl FnOnce(usize) -> State,
-    ) -> &'src mut State {
+        initializer: impl FnOnce() -> State,
+    ) -> Hook<'src, State> {
         let mut vals = self.hook_vals.borrow_mut();
 
         let hook_len = vals.len();
         let cur_idx = self.hook_idx.get();
 
         if cur_idx >= hook_len {
-            vals.push(self.hook_arena.alloc(initializer(hook_len)));
+            vals.push(self.hook_arena.alloc(initializer()));
         }
 
+        let mut_ref =
         vals
-            .get(cur_idx)
-            .and_then(|inn| {
+        .get(cur_idx)
+        .and_then(|inn| {
                 self.hook_idx.set(cur_idx + 1);
                 let raw_box = unsafe { &mut **inn };
                 raw_box.downcast_mut::<State>()
@@ -859,7 +866,8 @@ impl ScopeState {
                 You likely used the hook in a conditional. Hooks rely on consistent ordering between renders.
                 Functions prefixed with "use" should never be called conditionally.
                 "###,
-            )
+            );
+        Hook { data: mut_ref }
     }
 
     /// The "work in progress frame" represents the frame that is currently being worked on.
@@ -976,10 +984,10 @@ pub(crate) struct TaskQueue {
     sender: UnboundedSender<SchedulerMsg>,
 }
 
-pub(crate) type InnerTask = Pin<Box<dyn Future<Output = ()>>>;
+pub(crate) type InnerTask = BorrowedFuture;
 impl TaskQueue {
     fn spawn(&self, scope: ScopeId, task: impl Future<Output = ()> + 'static) -> TaskId {
-        let pinned = Box::pin(task);
+        let pinned = BorrowedFuture::new(Box::pin(task));
         let id = self.gen.get();
         self.gen.set(id + 1);
         let tid = TaskId { id, scope };

@@ -29,7 +29,6 @@ pub mod on {
                     pub fn $name<'a>(
                         factory: NodeFactory<'a>,
                         mut callback: impl FnMut($wrapper) + 'a,
-                        // mut callback: impl FnMut(UiEvent<$data>) + 'a,
                     ) -> Listener<'a>
                     {
                         let bump = &factory.bump();
@@ -52,7 +51,7 @@ pub mod on {
                         // ie copy
                         let shortname: &'static str = &event_name[2..];
 
-                        let handler = bump.alloc(std::cell::RefCell::new(Some(callback)));
+                        let handler = bump.alloc(std::cell::RefCell::new(Some(dioxus_core::prelude::BorrowingListenerCallback::new(callback))));
                         factory.listener(shortname, handler)
                     }
                 )*

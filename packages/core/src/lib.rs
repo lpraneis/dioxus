@@ -1,10 +1,14 @@
+#![feature(generic_associated_types)]
 #![allow(non_snake_case)]
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
 
 pub(crate) mod arbitrary_value;
+pub(crate) mod borrowing_future;
 pub(crate) mod diff;
 pub(crate) mod events;
+#[allow(unused)]
+pub(crate) mod hookref;
 pub(crate) mod lazynodes;
 pub(crate) mod mutations;
 pub(crate) mod nodes;
@@ -15,7 +19,9 @@ pub(crate) mod virtual_dom;
 
 pub(crate) mod innerlude {
     pub use crate::arbitrary_value::*;
+    pub use crate::borrowing_future::*;
     pub use crate::events::*;
+    pub use crate::hookref::*;
     pub use crate::lazynodes::*;
     pub use crate::mutations::*;
     pub use crate::nodes::*;
@@ -84,8 +90,9 @@ pub use crate::innerlude::{
 /// This includes types like [`Scope`], [`Element`], and [`Component`].
 pub mod prelude {
     pub use crate::innerlude::{
-        fc_to_builder, Attributes, Component, DioxusElement, Element, EventHandler, Fragment,
-        LazyNodes, NodeFactory, Properties, Scope, ScopeId, ScopeState, VNode, VirtualDom,
+        fc_to_builder, Attributes, BorrowedFuture, BorrowingListenerCallback, Component,
+        DioxusElement, Element, EventHandler, Fragment, Hook, LazyNodes, NodeFactory, Properties,
+        Scope, ScopeId, ScopeState, VNode, VirtualDom, WeakHook,
     };
 }
 
