@@ -1,4 +1,3 @@
-#![feature(generic_associated_types)]
 #![allow(non_snake_case)]
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]

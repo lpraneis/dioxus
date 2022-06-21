@@ -25,7 +25,7 @@ where
     F: Future<Output = T> + 'static,
     D: UseFutureDep,
 {
-    let state = cx.use_hook(move |_| UseFuture {
+    let mut state = cx.use_hook(move || UseFuture {
         update: cx.schedule_update(),
         needs_regen: Cell::new(true),
         slot: Rc::new(Cell::new(None)),
@@ -62,7 +62,7 @@ where
         })));
     }
 
-    state
+    state.into_mut()
 }
 
 pub enum FutureState<'a, T> {

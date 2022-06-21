@@ -7,7 +7,7 @@ use url::Url;
 /// context of a [`Router`]. If this function is called outside of a `Router`
 /// component it will panic.
 pub fn use_route(cx: &ScopeState) -> &UseRoute {
-    let handle = cx.use_hook(|_| {
+    let mut handle = cx.use_hook(|| {
         let router = cx
             .consume_context::<RouterService>()
             .expect("Cannot call use_route outside the scope of a Router component");
@@ -28,7 +28,7 @@ pub fn use_route(cx: &ScopeState) -> &UseRoute {
 
     handle.state.route = handle.router.current_location();
 
-    &handle.state
+    &handle.into_mut().state
 }
 
 /// A handle to the current location of the router.

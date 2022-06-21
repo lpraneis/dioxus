@@ -47,4 +47,9 @@ impl<'b, T: 'static> Hook<'b, T> {
             ptr: unsafe { self.data as *mut T },
         }
     }
+
+    /// Turn into a mutable reference to the data in this [`Hook`]
+    pub fn into_mut(self) -> &'b mut T {
+        self.data
+    }
 }

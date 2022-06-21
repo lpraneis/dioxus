@@ -80,7 +80,7 @@ pub struct LinkProps<'a> {
 /// }
 /// ```
 pub fn Link<'a>(cx: Scope<'a, LinkProps<'a>>) -> Element {
-    let svc = cx.use_hook(|_| cx.consume_context::<Arc<RouterCore>>());
+    let svc = cx.use_hook(|| cx.consume_context::<Arc<RouterCore>>());
 
     let LinkProps {
         to,
@@ -102,7 +102,7 @@ pub fn Link<'a>(cx: Scope<'a, LinkProps<'a>>) -> Element {
     let active_class_name = match active_class {
         Some(c) => (*c).into(),
         None => {
-            let active_from_router = match svc {
+            let active_from_router = match &*svc {
                 Some(service) => service.cfg.active_class.clone(),
                 None => None,
             };
@@ -126,7 +126,7 @@ pub fn Link<'a>(cx: Scope<'a, LinkProps<'a>>) -> Element {
             target: format_args!("{}", if *new_tab { "_blank" } else { "" }),
             onclick: move |_| {
                 if !outerlink {
-                    if let Some(service) = svc {
+                    if let Some(service) = &*svc {
                         service.push_route(to, cx.props.title.map(|f| f.to_string()), None);
                     } else {
                         log::error!(

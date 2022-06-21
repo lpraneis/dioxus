@@ -114,7 +114,7 @@ pub fn use_ref<'a, T: 'static>(
     cx: &'a ScopeState,
     initialize_refcell: impl FnOnce() -> T,
 ) -> &'a UseRef<T> {
-    let hook = cx.use_hook(|_| UseRef {
+    let mut hook = cx.use_hook(|| UseRef {
         update: cx.schedule_update(),
         value: Rc::new(RefCell::new(initialize_refcell())),
         dirty: Rc::new(Cell::new(false)),
@@ -126,7 +126,7 @@ pub fn use_ref<'a, T: 'static>(
         hook.dirty.set(false);
     }
 
-    hook
+    hook.into_mut()
 }
 
 /// A type created by the [`use_ref`] hook. See its documentation for more details.
