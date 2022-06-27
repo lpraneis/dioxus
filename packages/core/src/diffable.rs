@@ -5,6 +5,13 @@ use crate::{
     VPlaceholder, VText,
 };
 
+/// VNode
+/// - Allocated in the arena
+/// - Diffing produces edits to change the frontend
+/// - Can contain keys for diffing
+/// - Can handle event bubbling
+/// - Can contain components that add interactivity to the dom
+
 trait Diffable<'a> {
     type Regestry;
 
@@ -15,13 +22,21 @@ trait Diffable<'a> {
     fn diff(&self, old: &Self, registry: &mut Self::Regestry);
 }
 
-struct VDomRegestry<'a> {
+pub struct VDomRegestry<'a> {
     nodes_to_place: usize,
-    mutations: &'a mut Mutations<'a>,
+    pub(crate) mutations: Mutations<'a>,
     scopes: &'a ScopeArena,
 }
 
 impl<'a> VDomRegestry<'a> {
+    pub(crate) fn new(mutations: Mutations<'a>, scopes: &'a ScopeArena) -> Self {
+        Self {
+            nodes_to_place: 0,
+            mutations,
+            scopes,
+        }
+    }
+
     fn take_created(&mut self) -> usize {
         std::mem::take(&mut self.nodes_to_place)
     }
@@ -695,7 +710,7 @@ fn diff_keyed_middle<'b>(
                 new_node.create(registry);
             } else {
                 new_node.diff(&old[old_index], registry);
-                push_all_real_nodes(new_node, registry);
+                nodes_created += push_all_real_nodes(new_node, registry);
             }
         }
 
