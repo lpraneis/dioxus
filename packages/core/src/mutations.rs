@@ -6,7 +6,7 @@
 //! interpreters for these types of DomEdits.
 
 use crate::innerlude::*;
-use std::{any::Any, fmt::Debug};
+use std::fmt::Debug;
 
 /// ## Mutations
 ///
@@ -308,34 +308,5 @@ impl<'a> Mutations<'a> {
 
     pub(crate) fn mark_dirty_scope(&mut self, scope: ScopeId) {
         self.dirty_scopes.insert(scope);
-    }
-}
-
-// refs are only assigned once
-pub struct NodeRefMutation<'a> {
-    pub element: &'a mut Option<once_cell::sync::OnceCell<Box<dyn Any>>>,
-    pub element_id: ElementId,
-}
-
-impl<'a> std::fmt::Debug for NodeRefMutation<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeRefMutation")
-            .field("element_id", &self.element_id)
-            .finish()
-    }
-}
-
-impl<'a> NodeRefMutation<'a> {
-    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> {
-        self.element
-            .as_ref()
-            .and_then(|f| f.get())
-            .and_then(|f| f.downcast_ref::<T>())
-    }
-    pub fn downcast_mut<T: 'static>(&mut self) -> Option<&mut T> {
-        self.element
-            .as_mut()
-            .and_then(|f| f.get_mut())
-            .and_then(|f| f.downcast_mut::<T>())
     }
 }

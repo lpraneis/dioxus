@@ -16,7 +16,6 @@ trait Diffable<'a> {
 }
 
 struct VDomRegestry<'a> {
-    force_diff: bool,
     nodes_to_place: usize,
     mutations: &'a mut Mutations<'a>,
     scopes: &'a ScopeArena,
@@ -75,11 +74,36 @@ impl<'a> Diffable<'a> for VElement<'a> {
     type Regestry = VDomRegestry<'a>;
 
     fn create(&self, registry: &mut Self::Regestry) {
-        todo!()
+        let VElement {
+            tag: tag_name,
+            listeners,
+            attributes,
+            children,
+            namespace,
+            id: dom_id,
+            parent: parent_id,
+            ..
+        } = self;
+        let id = dom_id.get().unwrap();
+        registry.mutations.create_element(tag_name, *namespace, id);
+
+        for listener in *listeners {
+            registry.mutations.new_event_listener(listener);
+        }
+
+        for attr in *attributes {
+            registry.mutations.set_attribute(attr, id.as_u64());
+        }
+
+        if !children.is_empty() {
+            children.create(registry);
+        }
     }
 
     fn destroy(&self, registry: &mut Self::Regestry) {
-        todo!()
+        let id = self.id.get().unwrap();
+        registry.mutations.remove(id.as_u64());
+        self.children.destroy(registry);
     }
 
     fn diff(&self, old: &Self, registry: &mut Self::Regestry) {
@@ -174,80 +198,42 @@ impl<'a> Diffable<'a> for VComponent<'a> {
     type Regestry = VDomRegestry<'a>;
 
     fn create(&self, registry: &mut Self::Regestry) {
-        todo!()
+        let idx = self.scope.get().unwrap();
+
+        registry.mutations.mark_dirty_scope(idx);
+
+        // Take the node that was just generated from running the component
+        let nextnode = registry.scopes.fin_head(idx);
+        nextnode.create(registry)
     }
 
     fn destroy(&self, registry: &mut Self::Regestry) {
-        todo!()
+        let scope_id = self.scope.get().unwrap();
+        let root = registry.scopes.root_node(scope_id);
+        root.destroy(registry);
     }
 
     fn diff(&self, old: &Self, registry: &mut Self::Regestry) {
+        if std::ptr::eq(self, old) {
+            return;
+        }
+
         let scope_addr = old
             .scope
             .get()
             .expect("existing component nodes should have a scope");
 
-        if std::ptr::eq(self, old) {
-            return;
-        }
-
         // Make sure we're dealing with the same component (by function pointer)
         if old.user_fc == self.user_fc {
-            // self.enter_scope(scope_addr);
-            {
-                // Make sure the new component vnode is referencing the right scope id
-                // new.scope.set(Some(scope_addr));
+            registry.mutations.mark_dirty_scope(scope_addr);
 
-                // make sure the component's caller function is up to date
-                let scope = registry
-                    .scopes
-                    .get_scope(scope_addr)
-                    .unwrap_or_else(|| panic!("could not find {:?}", scope_addr));
-
-                // take the new props out regardless
-                // when memoizing, push to the existing scope if memoization happens
-                let new_props = self
-                    .props
-                    .borrow_mut()
-                    .take()
-                    .expect("new component props should exist");
-
-                let should_diff = {
-                    if old.can_memoize {
-                        // safety: we trust the implementation of "memoize"
-                        let props_are_the_same = unsafe {
-                            let new_ref = new_props.as_ref();
-                            scope.props.borrow().as_ref().unwrap().memoize(new_ref)
-                        };
-                        !props_are_the_same || registry.force_diff
-                    } else {
-                        true
-                    }
-                };
-
-                if should_diff {
-                    let _old_props = scope
-                        .props
-                        .replace(unsafe { std::mem::transmute(Some(new_props)) });
-
-                    // this should auto drop the previous props
-                    registry.scopes.run_scope(scope_addr);
-                    registry.mutations.mark_dirty_scope(scope_addr);
-
-                    registry
-                        .scopes
-                        .fin_head(scope_addr)
-                        .diff(registry.scopes.wip_head(scope_addr), registry);
-                } else {
-                    // memoization has taken place
-                    drop(new_props);
-                };
-            }
-            // self.leave_scope();
+            registry
+                .scopes
+                .fin_head(scope_addr)
+                .diff(registry.scopes.wip_head(scope_addr), registry);
         } else {
             old.destroy(registry);
             self.create(registry);
-            // self.replace_node(old_node, new_node);
         }
     }
 }
@@ -256,11 +242,11 @@ impl<'a> Diffable<'a> for VFragment<'a> {
     type Regestry = VDomRegestry<'a>;
 
     fn create(&self, registry: &mut Self::Regestry) {
-        todo!()
+        self.children.create(registry)
     }
 
     fn destroy(&self, registry: &mut Self::Regestry) {
-        todo!()
+        self.children.destroy(registry)
     }
 
     fn diff(&self, old: &Self, registry: &mut Self::Regestry) {
@@ -278,7 +264,7 @@ impl<'a> Diffable<'a> for VFragment<'a> {
         debug_assert!(!old.children.is_empty());
         debug_assert!(!self.children.is_empty());
 
-        self.diff_children(old.children, self.children, registry);
+        self.children.diff(&old.children, registry);
     }
 }
 
@@ -343,14 +329,14 @@ impl<'b> Diffable<'b> for &'b [VNode<'b>] {
     type Regestry = VDomRegestry<'b>;
 
     fn create(&self, registry: &mut Self::Regestry) {
-        for node in self {
-            node.create(node);
+        for node in *self {
+            node.create(registry);
         }
     }
 
     fn destroy(&self, registry: &mut Self::Regestry) {
-        for node in self {
-            node.distroy(registry);
+        for node in *self {
+            node.destroy(registry);
         }
     }
 
@@ -422,7 +408,7 @@ fn diff_non_keyed_children<'b>(
     debug_assert!(!old.is_empty());
 
     match old.len().cmp(&new.len()) {
-        Ordering::Greater => old[new.len()..].for_each(|n| n.destroy(registry)),
+        Ordering::Greater => old[new.len()..].iter().for_each(|n| n.destroy(registry)),
         Ordering::Less => create_and_insert_after(&new[old.len()..], old.last().unwrap(), registry),
         Ordering::Equal => {}
     }
@@ -552,7 +538,7 @@ fn diff_keyed_ends<'b>(
     // And if that was all of the new children, then remove all of the remaining
     // old children and we're finished.
     if left_offset == new.len() {
-        old[left_offset..].destroy(registry);
+        (&old[left_offset..]).destroy(registry);
         return None;
     }
 
@@ -645,10 +631,10 @@ fn diff_keyed_middle<'b>(
     // create the new children afresh.
     if shared_keys.is_empty() {
         if let Some(first_old) = old.get(0) {
-            &old[1..].destroy(registry);
+            (&old[1..]).destroy(registry);
             new.create(registry);
             let nodes_created = registry.take_created();
-            self.replace_inner(first_old, nodes_created);
+            replace_inner(first_old, nodes_created, registry);
         } else {
             // I think this is wrong - why are we appending?
             // only valid of the if there are no trailing elements
@@ -662,7 +648,7 @@ fn diff_keyed_middle<'b>(
     for child in old {
         let key = child.key().unwrap();
         if !shared_keys.contains(&key) {
-            self.remove_nodes([child], true);
+            child.destroy(registry);
         }
     }
 
@@ -690,30 +676,32 @@ fn diff_keyed_middle<'b>(
     }
 
     for idx in &lis_sequence {
-        self.diff_node(&old[new_index_to_old_index[*idx]], &new[*idx]);
+        new[*idx].diff(&old[new_index_to_old_index[*idx]], registry);
     }
 
     let mut nodes_created = 0;
-
-    // add mount instruction for the first items not covered by the lis
+    // add mount instruction for the first items not covered by the list
     let last = *lis_sequence.last().unwrap();
     if last < (new.len() - 1) {
         for (idx, new_node) in new[(last + 1)..].iter().enumerate() {
             let new_idx = idx + last + 1;
             let old_index = new_index_to_old_index[new_idx];
             if old_index == u32::MAX as usize {
-                nodes_created += self.create_node(new_node);
+                new_node.create(registry);
             } else {
-                self.diff_node(&old[old_index], new_node);
-                nodes_created += self.push_all_real_nodes(new_node);
+                new_node.diff(&old[old_index], registry);
+                push_all_real_nodes(new_node, registry);
             }
         }
 
-        self.mutations.insert_after(
-            self.find_last_element(&new[last]).unwrap(),
+        nodes_created += registry.take_created();
+        let VDomRegestry {
+            mutations, scopes, ..
+        } = registry;
+        mutations.insert_after(
+            find_last_element(&new[last], *scopes).unwrap(),
             nodes_created as u32,
         );
-        nodes_created = 0;
     }
 
     // for each spacing, generate a mount instruction
@@ -725,15 +713,19 @@ fn diff_keyed_middle<'b>(
                 let new_idx = idx + next + 1;
                 let old_index = new_index_to_old_index[new_idx];
                 if old_index == u32::MAX as usize {
-                    nodes_created += self.create_node(new_node);
+                    new_node.create(registry);
                 } else {
-                    self.diff_node(&old[old_index], new_node);
-                    nodes_created += self.push_all_real_nodes(new_node);
+                    new_node.diff(&old[old_index], registry);
+                    nodes_created += push_all_real_nodes(new_node, registry);
                 }
             }
 
-            self.mutations.insert_before(
-                self.find_first_element(&new[last]).unwrap(),
+            nodes_created += registry.take_created();
+            let VDomRegestry {
+                mutations, scopes, ..
+            } = registry;
+            mutations.insert_before(
+                find_first_element(&new[last], *scopes).unwrap(),
                 nodes_created as u32,
             );
 
@@ -748,24 +740,25 @@ fn diff_keyed_middle<'b>(
         for (idx, new_node) in new[..first_lis].iter().enumerate() {
             let old_index = new_index_to_old_index[idx];
             if old_index == u32::MAX as usize {
-                nodes_created += self.create_node(new_node);
+                new_node.create(registry);
             } else {
                 new_node.diff(&old[old_index], registry);
-                nodes_created += self.push_all_real_nodes(new_node);
+                nodes_created += push_all_real_nodes(new_node, registry);
             }
         }
 
-        registry.mutations.insert_before(
-            find_first_element(&new[first_lis], registry).unwrap(),
+        nodes_created += registry.take_created();
+        let VDomRegestry {
+            mutations, scopes, ..
+        } = registry;
+        mutations.insert_before(
+            find_first_element(&new[first_lis], *scopes).unwrap(),
             nodes_created as u32,
         );
     }
 }
 
-fn find_last_element<'b>(
-    vnode: &'b VNode<'b>,
-    registry: &mut VDomRegestry<'b>,
-) -> Option<ElementId> {
+fn find_last_element<'b>(vnode: &'b VNode<'b>, scopes: &'b ScopeArena) -> Option<ElementId> {
     let mut search_node = Some(vnode);
     loop {
         match &search_node.take().unwrap() {
@@ -775,16 +768,13 @@ fn find_last_element<'b>(
             VNode::Fragment(frag) => search_node = frag.children.last(),
             VNode::Component(el) => {
                 let scope_id = el.scope.get().unwrap();
-                search_node = Some(registry.scopes.root_node(scope_id));
+                search_node = Some(scopes.root_node(scope_id));
             }
         }
     }
 }
 
-fn find_first_element<'b>(
-    vnode: &'b VNode<'b>,
-    registry: &mut VDomRegestry<'b>,
-) -> Option<ElementId> {
+fn find_first_element<'b>(vnode: &'b VNode<'b>, scopes: &'b ScopeArena) -> Option<ElementId> {
     let mut search_node = Some(vnode);
     loop {
         match &search_node.take().expect("search node to have an ID") {
@@ -794,7 +784,7 @@ fn find_first_element<'b>(
             VNode::Fragment(frag) => search_node = Some(&frag.children[0]),
             VNode::Component(el) => {
                 let scope = el.scope.get().expect("element to have a scope assigned");
-                search_node = Some(registry.scopes.root_node(scope));
+                search_node = Some(scopes.root_node(scope));
             }
         }
     }
@@ -807,7 +797,7 @@ fn create_and_insert_after<'b>(
 ) {
     nodes.create(registry);
     let created = registry.take_created();
-    let last = find_last_element(after, registry).unwrap();
+    let last = find_last_element(after, registry.scopes).unwrap();
     registry.mutations.insert_after(last, created as u32);
 }
 
@@ -818,7 +808,7 @@ fn create_and_insert_before<'b>(
 ) {
     nodes.create(registry);
     let created = registry.nodes_to_place;
-    let first = find_first_element(before, registry).unwrap();
+    let first = find_first_element(before, registry.scopes).unwrap();
     registry.mutations.insert_before(first, created as u32);
 }
 
@@ -826,4 +816,36 @@ fn create_and_append_children<'b>(nodes: &'b [VNode<'b>], registry: &mut VDomReg
     nodes.create(registry);
     let created = registry.take_created();
     registry.mutations.append_children(created as u32);
+}
+
+fn replace_inner<'b>(old: &'b VNode<'b>, nodes_created: usize, registry: &mut VDomRegestry<'b>) {
+    let id = old
+        .try_mounted_id()
+        .unwrap_or_else(|| panic!("broke on {:?}", old));
+
+    registry.mutations.replace_with(id, nodes_created as u32);
+}
+
+// recursively push all the nodes of a tree onto the stack and return how many are there
+fn push_all_real_nodes<'b>(node: &'b VNode<'b>, registry: &mut VDomRegestry<'b>) -> usize {
+    match node {
+        VNode::Text(_) | VNode::Placeholder(_) | VNode::Element(_) => {
+            registry.mutations.push_root(node.mounted_id());
+            1
+        }
+
+        VNode::Fragment(frag) => {
+            let mut added = 0;
+            for child in frag.children {
+                added += push_all_real_nodes(child, registry);
+            }
+            added
+        }
+
+        VNode::Component(c) => {
+            let scope_id = c.scope.get().unwrap();
+            let root = registry.scopes.root_node(scope_id);
+            push_all_real_nodes(root, registry)
+        }
+    }
 }
