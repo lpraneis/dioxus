@@ -1,5 +1,8 @@
+use fxhash::{FxHashMap, FxHashSet};
+
 use crate::{
-    innerlude::ScopeArena, Mutations, VComponent, VElement, VFragment, VNode, VPlaceholder, VText,
+    innerlude::ScopeArena, ElementId, Mutations, VComponent, VElement, VFragment, VNode,
+    VPlaceholder, VText,
 };
 
 trait Diffable<'a> {
@@ -14,8 +17,15 @@ trait Diffable<'a> {
 
 struct VDomRegestry<'a> {
     force_diff: bool,
+    nodes_to_place: usize,
     mutations: &'a mut Mutations<'a>,
     scopes: &'a ScopeArena,
+}
+
+impl<'a> VDomRegestry<'a> {
+    fn take_created(&mut self) -> usize {
+        std::mem::take(&mut self.nodes_to_place)
+    }
 }
 
 impl<'a> Diffable<'a> for VText<'a> {
@@ -329,48 +339,64 @@ impl<'a> Diffable<'a> for VNode<'a> {
     }
 }
 
-// Diff the given set of old and new children.
-//
-// The parent must be on top of the change list stack when this function is
-// entered:
-//
-//     [... parent]
-//
-// the change list stack is in the same state when this function returns.
-//
-// If old no anchors are provided, then it's assumed that we can freely append to the parent.
-//
-// Remember, non-empty lists does not mean that there are real elements, just that there are virtual elements.
-//
-// Fragment nodes cannot generate empty children lists, so we can assume that when a list is empty, it belongs only
-// to an element, and appending makes sense.
-fn diff_children<'b>(old: &'b [VNode<'b>], new: &'b [VNode<'b>], registry: &mut VDomRegestry<'b>) {
-    if std::ptr::eq(old, new) {
-        return;
+impl<'b> Diffable<'b> for &'b [VNode<'b>] {
+    type Regestry = VDomRegestry<'b>;
+
+    fn create(&self, registry: &mut Self::Regestry) {
+        for node in self {
+            node.create(node);
+        }
     }
 
-    // Remember, fragments can never be empty (they always have a single child)
-    match (old, new) {
-        ([], []) => {}
-        ([], _) => self.create_and_append_children(new),
-        (_, []) => self.remove_nodes(old, true),
-        _ => {
-            let new_is_keyed = new[0].key().is_some();
-            let old_is_keyed = old[0].key().is_some();
+    fn destroy(&self, registry: &mut Self::Regestry) {
+        for node in self {
+            node.distroy(registry);
+        }
+    }
 
-            debug_assert!(
-                new.iter().all(|n| n.key().is_some() == new_is_keyed),
-                "all siblings must be keyed or all siblings must be non-keyed"
-            );
-            debug_assert!(
-                old.iter().all(|o| o.key().is_some() == old_is_keyed),
-                "all siblings must be keyed or all siblings must be non-keyed"
-            );
+    // Diff the given set of old and new children.
+    //
+    // The parent must be on top of the change list stack when this function is
+    // entered:
+    //
+    //     [... parent]
+    //
+    // the change list stack is in the same state when this function returns.
+    //
+    // If old no anchors are provided, then it's assumed that we can freely append to the parent.
+    //
+    // Remember, non-empty lists does not mean that there are real elements, just that there are virtual elements.
+    //
+    // Fragment nodes cannot generate empty children lists, so we can assume that when a list is empty, it belongs only
+    // to an element, and appending makes sense.
+    fn diff(&self, old: &Self, registry: &mut Self::Regestry) {
+        if std::ptr::eq(old, self) {
+            return;
+        }
 
-            if new_is_keyed && old_is_keyed {
-                self.diff_keyed_children(old, new);
-            } else {
-                self.diff_non_keyed_children(old, new);
+        // Remember, fragments can never be empty (they always have a single child)
+        match (old, self) {
+            ([], []) => {}
+            ([], _) => create_and_append_children(self, registry),
+            (_, []) => old.destroy(registry),
+            _ => {
+                let new_is_keyed = self[0].key().is_some();
+                let old_is_keyed = old[0].key().is_some();
+
+                debug_assert!(
+                    self.iter().all(|n| n.key().is_some() == new_is_keyed),
+                    "all siblings must be keyed or all siblings must be non-keyed"
+                );
+                debug_assert!(
+                    old.iter().all(|o| o.key().is_some() == old_is_keyed),
+                    "all siblings must be keyed or all siblings must be non-keyed"
+                );
+
+                if new_is_keyed && old_is_keyed {
+                    diff_keyed_children(old, self, registry);
+                } else {
+                    diff_non_keyed_children(old, self, registry);
+                }
             }
         }
     }
@@ -384,7 +410,11 @@ fn diff_children<'b>(old: &'b [VNode<'b>], new: &'b [VNode<'b>], registry: &mut 
 //     [... parent]
 //
 // the change list stack is in the same state when this function returns.
-fn diff_non_keyed_children(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]) {
+fn diff_non_keyed_children<'b>(
+    old: &'b [VNode<'b>],
+    new: &'b [VNode<'b>],
+    registry: &mut VDomRegestry<'b>,
+) {
     use std::cmp::Ordering;
 
     // Handled these cases in `diff_children` before calling this function.
@@ -392,13 +422,13 @@ fn diff_non_keyed_children(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]
     debug_assert!(!old.is_empty());
 
     match old.len().cmp(&new.len()) {
-        Ordering::Greater => self.remove_nodes(&old[new.len()..], true),
-        Ordering::Less => self.create_and_insert_after(&new[old.len()..], old.last().unwrap()),
+        Ordering::Greater => old[new.len()..].for_each(|n| n.destroy(registry)),
+        Ordering::Less => create_and_insert_after(&new[old.len()..], old.last().unwrap(), registry),
         Ordering::Equal => {}
     }
 
     for (new, old) in new.iter().zip(old.iter()) {
-        self.diff_node(old, new);
+        new.diff(old, registry);
     }
 }
 
@@ -418,7 +448,11 @@ fn diff_non_keyed_children(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]
 // https://github.com/infernojs/inferno/blob/36fd96/packages/inferno/src/DOM/patching.ts#L530-L739
 //
 // The stack is empty upon entry.
-fn diff_keyed_children(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]) {
+fn diff_keyed_children<'b>(
+    old: &'b [VNode<'b>],
+    new: &'b [VNode<'b>],
+    registry: &mut VDomRegestry<'b>,
+) {
     if cfg!(debug_assertions) {
         let mut keys = fxhash::FxHashSet::default();
         let mut assert_unique_keys = |children: &'b [VNode<'b>]| {
@@ -446,7 +480,7 @@ fn diff_keyed_children(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]) {
     //
     // `shared_prefix_count` is the count of how many nodes at the start of
     // `new` and `old` share the same keys.
-    let (left_offset, right_offset) = match self.diff_keyed_ends(old, new) {
+    let (left_offset, right_offset) = match diff_keyed_ends(old, new, registry) {
         Some(count) => count,
         None => return,
     };
@@ -465,25 +499,25 @@ fn diff_keyed_children(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]) {
 
     if new_middle.is_empty() {
         // remove the old elements
-        self.remove_nodes(old_middle, true);
+        old_middle.destroy(registry);
     } else if old_middle.is_empty() {
         // there were no old elements, so just create the new elements
         // we need to find the right "foothold" though - we shouldn't use the "append" at all
         if left_offset == 0 {
             // insert at the beginning of the old list
             let foothold = &old[old.len() - right_offset];
-            self.create_and_insert_before(new_middle, foothold);
+            create_and_insert_before(new_middle, foothold, registry);
         } else if right_offset == 0 {
             // insert at the end  the old list
             let foothold = old.last().unwrap();
-            self.create_and_insert_after(new_middle, foothold);
+            create_and_insert_after(new_middle, foothold, registry);
         } else {
             // inserting in the middle
             let foothold = &old[left_offset - 1];
-            self.create_and_insert_after(new_middle, foothold);
+            create_and_insert_after(new_middle, foothold, registry);
         }
     } else {
-        self.diff_keyed_middle(old_middle, new_middle);
+        diff_keyed_middle(old_middle, new_middle, registry);
     }
 }
 
@@ -492,10 +526,10 @@ fn diff_keyed_children(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]) {
 /// Returns a left offset and right offset of that indicates a smaller section to pass onto the middle diffing.
 ///
 /// If there is no offset, then this function returns None and the diffing is complete.
-fn diff_keyed_ends(
-    &mut self,
+fn diff_keyed_ends<'b>(
     old: &'b [VNode<'b>],
     new: &'b [VNode<'b>],
+    registry: &mut VDomRegestry<'b>,
 ) -> Option<(usize, usize)> {
     let mut left_offset = 0;
 
@@ -504,21 +538,21 @@ fn diff_keyed_ends(
         if old.key() != new.key() {
             break;
         }
-        self.diff_node(old, new);
+        new.diff(old, registry);
         left_offset += 1;
     }
 
     // If that was all of the old children, then create and append the remaining
     // new children and we're finished.
     if left_offset == old.len() {
-        self.create_and_insert_after(&new[left_offset..], old.last().unwrap());
+        create_and_insert_after(&new[left_offset..], old.last().unwrap(), registry);
         return None;
     }
 
     // And if that was all of the new children, then remove all of the remaining
     // old children and we're finished.
     if left_offset == new.len() {
-        self.remove_nodes(&old[left_offset..], true);
+        old[left_offset..].destroy(registry);
         return None;
     }
 
@@ -529,7 +563,7 @@ fn diff_keyed_ends(
         if old.key() != new.key() {
             break;
         }
-        self.diff_node(old, new);
+        new.diff(old, registry);
         right_offset += 1;
     }
 
@@ -550,7 +584,11 @@ fn diff_keyed_ends(
 //
 // Upon exit from this function, it will be restored to that same self.
 #[allow(clippy::too_many_lines)]
-fn diff_keyed_middle(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]) {
+fn diff_keyed_middle<'b>(
+    old: &'b [VNode<'b>],
+    new: &'b [VNode<'b>],
+    registry: &mut VDomRegestry<'b>,
+) {
     /*
     1. Map the old keys into a numerical ordering based on indices.
     2. Create a map of old key to its index
@@ -607,13 +645,14 @@ fn diff_keyed_middle(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]) {
     // create the new children afresh.
     if shared_keys.is_empty() {
         if let Some(first_old) = old.get(0) {
-            self.remove_nodes(&old[1..], true);
-            let nodes_created = self.create_children(new);
+            &old[1..].destroy(registry);
+            new.create(registry);
+            let nodes_created = registry.take_created();
             self.replace_inner(first_old, nodes_created);
         } else {
             // I think this is wrong - why are we appending?
             // only valid of the if there are no trailing elements
-            self.create_and_append_children(new);
+            create_and_append_children(new, registry);
         }
         return;
     }
@@ -711,14 +750,80 @@ fn diff_keyed_middle(&mut self, old: &'b [VNode<'b>], new: &'b [VNode<'b>]) {
             if old_index == u32::MAX as usize {
                 nodes_created += self.create_node(new_node);
             } else {
-                self.diff_node(&old[old_index], new_node);
+                new_node.diff(&old[old_index], registry);
                 nodes_created += self.push_all_real_nodes(new_node);
             }
         }
 
-        self.mutations.insert_before(
-            self.find_first_element(&new[first_lis]).unwrap(),
+        registry.mutations.insert_before(
+            find_first_element(&new[first_lis], registry).unwrap(),
             nodes_created as u32,
         );
     }
+}
+
+fn find_last_element<'b>(
+    vnode: &'b VNode<'b>,
+    registry: &mut VDomRegestry<'b>,
+) -> Option<ElementId> {
+    let mut search_node = Some(vnode);
+    loop {
+        match &search_node.take().unwrap() {
+            VNode::Text(t) => break t.id.get(),
+            VNode::Element(t) => break t.id.get(),
+            VNode::Placeholder(t) => break t.id.get(),
+            VNode::Fragment(frag) => search_node = frag.children.last(),
+            VNode::Component(el) => {
+                let scope_id = el.scope.get().unwrap();
+                search_node = Some(registry.scopes.root_node(scope_id));
+            }
+        }
+    }
+}
+
+fn find_first_element<'b>(
+    vnode: &'b VNode<'b>,
+    registry: &mut VDomRegestry<'b>,
+) -> Option<ElementId> {
+    let mut search_node = Some(vnode);
+    loop {
+        match &search_node.take().expect("search node to have an ID") {
+            VNode::Text(t) => break t.id.get(),
+            VNode::Element(t) => break t.id.get(),
+            VNode::Placeholder(t) => break t.id.get(),
+            VNode::Fragment(frag) => search_node = Some(&frag.children[0]),
+            VNode::Component(el) => {
+                let scope = el.scope.get().expect("element to have a scope assigned");
+                search_node = Some(registry.scopes.root_node(scope));
+            }
+        }
+    }
+}
+
+fn create_and_insert_after<'b>(
+    nodes: &'b [VNode<'b>],
+    after: &'b VNode<'b>,
+    registry: &mut VDomRegestry<'b>,
+) {
+    nodes.create(registry);
+    let created = registry.take_created();
+    let last = find_last_element(after, registry).unwrap();
+    registry.mutations.insert_after(last, created as u32);
+}
+
+fn create_and_insert_before<'b>(
+    nodes: &'b [VNode<'b>],
+    before: &'b VNode<'b>,
+    registry: &mut VDomRegestry<'b>,
+) {
+    nodes.create(registry);
+    let created = registry.nodes_to_place;
+    let first = find_first_element(before, registry).unwrap();
+    registry.mutations.insert_before(first, created as u32);
+}
+
+fn create_and_append_children<'b>(nodes: &'b [VNode<'b>], registry: &mut VDomRegestry<'b>) {
+    nodes.create(registry);
+    let created = registry.take_created();
+    registry.mutations.append_children(created as u32);
 }
