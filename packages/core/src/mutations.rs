@@ -21,16 +21,12 @@ pub struct Mutations<'a> {
 
     /// The list of Scopes that were diffed, created, and removed during the Diff process.
     pub dirty_scopes: FxHashSet<ScopeId>,
-
-    /// The list of nodes to connect to the RealDOM.
-    pub refs: Vec<NodeRefMutation<'a>>,
 }
 
 impl Debug for Mutations<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Mutations")
             .field("edits", &self.edits)
-            .field("noderefs", &self.refs)
             .finish()
     }
 }
@@ -134,9 +130,6 @@ pub enum DomEdit<'bump> {
         event_name: &'static str,
 
         /// The ID of the node to attach the listener to.
-        scope: ScopeId,
-
-        /// The ID of the node to attach the listener to.
         root: u64,
     },
 
@@ -198,7 +191,6 @@ impl<'a> Mutations<'a> {
     pub(crate) fn new() -> Self {
         Self {
             edits: Vec::new(),
-            refs: Vec::new(),
             dirty_scopes: Default::default(),
         }
     }
@@ -263,7 +255,7 @@ impl<'a> Mutations<'a> {
     }
 
     // events
-    pub(crate) fn new_event_listener(&mut self, listener: &Listener, scope: ScopeId) {
+    pub(crate) fn new_event_listener(&mut self, listener: &Listener) {
         let Listener {
             event,
             mounted_node,
@@ -273,7 +265,6 @@ impl<'a> Mutations<'a> {
         let element_id = mounted_node.get().unwrap().as_u64();
 
         self.edits.push(NewEventListener {
-            scope,
             event_name: event,
             root: element_id,
         });

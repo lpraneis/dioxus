@@ -208,11 +208,9 @@ impl<'b> DiffState<'b> {
         {
             self.mutations.create_element(tag_name, *namespace, real_id);
 
-            let cur_scope_id = self.current_scope();
-
             for listener in listeners.iter() {
                 listener.mounted_node.set(Some(real_id));
-                self.mutations.new_event_listener(listener, cur_scope_id);
+                self.mutations.new_event_listener(listener);
             }
 
             for attr in attributes.iter() {
@@ -398,14 +396,12 @@ impl<'b> DiffState<'b> {
         // We also need to make sure that all listeners are properly attached to the parent scope (fix_listener)
         //
         // TODO: take a more efficient path than this
-        let cur_scope_id = self.current_scope();
-
         if old.listeners.len() == new.listeners.len() {
             for (old_l, new_l) in old.listeners.iter().zip(new.listeners.iter()) {
                 if old_l.event != new_l.event {
                     self.mutations
                         .remove_event_listener(old_l.event, root.as_u64());
-                    self.mutations.new_event_listener(new_l, cur_scope_id);
+                    self.mutations.new_event_listener(new_l);
                 }
                 new_l.mounted_node.set(old_l.mounted_node.get());
             }
@@ -416,7 +412,7 @@ impl<'b> DiffState<'b> {
             }
             for listener in new.listeners {
                 listener.mounted_node.set(Some(root));
-                self.mutations.new_event_listener(listener, cur_scope_id);
+                self.mutations.new_event_listener(listener);
             }
         }
 

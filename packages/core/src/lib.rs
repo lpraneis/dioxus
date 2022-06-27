@@ -4,6 +4,7 @@
 
 pub(crate) mod arbitrary_value;
 pub(crate) mod diff;
+pub(crate) mod diffable;
 pub(crate) mod events;
 pub(crate) mod lazynodes;
 pub(crate) mod mutations;
