@@ -33,6 +33,7 @@ impl<'a> Diffable<'a> for VText<'a> {
     fn create(&self, registry: &mut Self::Regestry) {
         let id = self.id.get().unwrap();
         registry.mutations.create_text_node(self.text, id);
+        registry.nodes_to_place += 1;
     }
 
     fn destroy(&self, registry: &mut Self::Regestry) {
@@ -60,6 +61,7 @@ impl<'a> Diffable<'a> for VPlaceholder {
     fn create(&self, registry: &mut Self::Regestry) {
         let id = self.id.get().unwrap();
         registry.mutations.create_placeholder(id);
+        registry.nodes_to_place += 1;
     }
 
     fn destroy(&self, registry: &mut Self::Regestry) {
@@ -81,7 +83,6 @@ impl<'a> Diffable<'a> for VElement<'a> {
             children,
             namespace,
             id: dom_id,
-            parent: parent_id,
             ..
         } = self;
         let id = dom_id.get().unwrap();
@@ -95,9 +96,13 @@ impl<'a> Diffable<'a> for VElement<'a> {
             registry.mutations.set_attribute(attr, id.as_u64());
         }
 
+        let old_children = registry.take_created();
+
         if !children.is_empty() {
-            children.create(registry);
+            create_and_append_children(children, registry);
         }
+
+        registry.nodes_to_place = old_children + 1;
     }
 
     fn destroy(&self, registry: &mut Self::Regestry) {
@@ -204,7 +209,7 @@ impl<'a> Diffable<'a> for VComponent<'a> {
 
         // Take the node that was just generated from running the component
         let nextnode = registry.scopes.fin_head(idx);
-        nextnode.create(registry)
+        nextnode.create(registry);
     }
 
     fn destroy(&self, registry: &mut Self::Regestry) {
