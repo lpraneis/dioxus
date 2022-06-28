@@ -214,8 +214,14 @@ impl ScopeArena {
         id
     }
 
-    pub fn update_node<'a>(&self, node: &'a VNode<'a>, id: ElementId) {
-        let node = unsafe { extend_vnode(node) };
+    pub fn update_node<'a>(&self, new: &'a mut VNode<'a>, old: &'a VNode<'a>) {
+        // if the node is comming back not assigned, that means it was borrowed but removed
+        let root = match old.id.get() {
+            Some(id) => id,
+            None => self.reserve_node(new),
+        };
+
+        let node = unsafe { extend_vnode(new) };
         *self.nodes.borrow_mut().get_mut(id.0).unwrap() = node;
     }
 
@@ -298,19 +304,17 @@ impl ScopeArena {
 
         let props = scope.props.borrow();
         let render = props.as_ref().unwrap();
-        if let Some(node) = render.render(scope) {
-            let frame = scope.wip_frame();
-            let node = frame.bump.alloc(node);
-            frame.node.set(unsafe { extend_vnode(node) });
+        let frame = scope.wip_frame();
+        let node = if let Some(node) = render.render(scope) {
+            frame.bump.alloc(node)
         } else {
-            let frame = scope.wip_frame();
-            let node = frame
+            frame
                 .bump
                 .alloc(VNode::Placeholder(frame.bump.alloc(VPlaceholder {
                     id: Default::default(),
-                })));
-            frame.node.set(unsafe { extend_vnode(node) });
-        }
+                })))
+        };
+        frame.node.set(unsafe { extend_vnode(node) });
 
         // make the "wip frame" contents the "finished frame"
         // any future dipping into completed nodes after "render" will go through "fin head"

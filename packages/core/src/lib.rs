@@ -8,6 +8,7 @@ pub(crate) mod diffable;
 pub(crate) mod events;
 pub(crate) mod lazynodes;
 pub(crate) mod mutations;
+pub(crate) mod nodelike;
 pub(crate) mod nodes;
 pub(crate) mod properties;
 pub(crate) mod scopes;

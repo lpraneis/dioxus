@@ -19,6 +19,7 @@ pub(crate) trait Diffable<'a> {
 
     fn destroy(&self, registry: &mut Self::Regestry);
 
+    /// Diff a new node against the old node and return if the old node needs to be destroyed
     fn diff(&self, old: &Self, registry: &mut Self::Regestry);
 }
 

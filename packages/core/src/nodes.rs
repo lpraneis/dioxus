@@ -21,6 +21,18 @@ use std::{
 /// - the `rsx!` macro
 /// - the [`NodeFactory`] API
 pub enum VNode<'src> {
+    /// A node that will be rendered.
+    RenderedNode(RenderedNode<'src>),
+    /// A node that will not be rendered.
+    PhantomNode(PhantomNode<'src>),
+}
+
+struct RenderedNode<'src> {
+    id: Cell<Option<ElementId>>,
+    inner: RenderedNodeInner<'src>,
+}
+
+enum RenderedNodeInner<'src> {
     /// Text VNodes are simply bump-allocated (or static) string slices
     ///
     /// # Example
@@ -62,6 +74,26 @@ pub enum VNode<'src> {
     /// ```
     Element(&'src VElement<'src>),
 
+    /// Placeholders are a type of placeholder VNode used when fragments don't contain any children.
+    ///
+    /// Placeholders cannot be directly constructed via public APIs.
+    ///
+    /// # Example
+    ///
+    /// ```rust, ignore
+    /// let mut vdom = VirtualDom::new();
+    ///
+    /// let node = vdom.render_vnode(rsx!( Fragment {} ));
+    ///
+    /// if let VNode::Fragment(frag) = node {
+    ///     let root = &frag.children[0];
+    ///     assert_eq!(root, VNode::Anchor);
+    /// }
+    /// ```
+    Placeholder(&'src VPlaceholder),
+}
+
+enum PhantomNode<'src> {
     /// Fragment nodes may contain many VNodes without a single root.
     ///
     /// # Example
@@ -95,35 +127,23 @@ pub enum VNode<'src> {
     /// }
     /// ```
     Component(&'src VComponent<'src>),
-
-    /// Placeholders are a type of placeholder VNode used when fragments don't contain any children.
-    ///
-    /// Placeholders cannot be directly constructed via public APIs.
-    ///
-    /// # Example
-    ///
-    /// ```rust, ignore
-    /// let mut vdom = VirtualDom::new();
-    ///
-    /// let node = vdom.render_vnode(rsx!( Fragment {} ));
-    ///
-    /// if let VNode::Fragment(frag) = node {
-    ///     let root = &frag.children[0];
-    ///     assert_eq!(root, VNode::Anchor);
-    /// }
-    /// ```
-    Placeholder(&'src VPlaceholder),
 }
 
 impl<'src> VNode<'src> {
     /// Get the VNode's "key" used in the keyed diffing algorithm.
     pub fn key(&self) -> Option<&'src str> {
         match &self {
-            VNode::Element(el) => el.key,
-            VNode::Component(c) => c.key,
-            VNode::Fragment(f) => f.key,
-            VNode::Text(_t) => None,
-            VNode::Placeholder(_f) => None,
+            VNode::RenderedNode(r) => {
+                let inner = &r.inner;
+                match inner {
+                    RenderedNodeInner::Element(e) => e.key,
+                    _ => None,
+                }
+            }
+            VNode::PhantomNode(ph) => match ph {
+                PhantomNode::Component(comp) => comp.key,
+                PhantomNode::Fragment(frag) => None,
+            },
         }
     }
 
@@ -139,22 +159,16 @@ impl<'src> VNode<'src> {
     /// Returns None if the VNode is not mounted, or if the VNode cannot be presented by a mounted ID (Fragment/Component)
     pub fn try_mounted_id(&self) -> Option<ElementId> {
         match &self {
-            VNode::Text(el) => el.id.get(),
-            VNode::Element(el) => el.id.get(),
-            VNode::Placeholder(el) => el.id.get(),
-            VNode::Fragment(_) => None,
-            VNode::Component(_) => None,
+            VNode::PhantomNode(ph) => None,
+            VNode::RenderedNode(r) => r.id.get(),
         }
     }
 
     // Create an "owned" version of the vnode.
     pub(crate) fn decouple(&self) -> VNode<'src> {
         match *self {
-            VNode::Text(t) => VNode::Text(t),
-            VNode::Element(e) => VNode::Element(e),
-            VNode::Component(c) => VNode::Component(c),
-            VNode::Placeholder(a) => VNode::Placeholder(a),
-            VNode::Fragment(f) => VNode::Fragment(f),
+            VNode::PhantomNode(ph) => VNode::PhantomNode(ph),
+            VNode::RenderedNode(r) => VNode::RenderedNode(r),
         }
     }
 }
@@ -162,34 +176,38 @@ impl<'src> VNode<'src> {
 impl Debug for VNode<'_> {
     fn fmt(&self, s: &mut Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         match &self {
-            VNode::Element(el) => s
-                .debug_struct("VNode::Element")
-                .field("name", &el.tag)
-                .field("key", &el.key)
-                .field("attrs", &el.attributes)
-                .field("children", &el.children)
-                .field("id", &el.id)
-                .finish(),
-            VNode::Text(t) => s
-                .debug_struct("VNode::Text")
-                .field("text", &t.text)
-                .field("id", &t.id)
-                .finish(),
-            VNode::Placeholder(t) => s
-                .debug_struct("VNode::Placholder")
-                .field("id", &t.id)
-                .finish(),
-            VNode::Fragment(frag) => s
-                .debug_struct("VNode::Fragment")
-                .field("children", &frag.children)
-                .finish(),
-            VNode::Component(comp) => s
-                .debug_struct("VNode::Component")
-                .field("name", &comp.fn_name)
-                .field("fnptr", &comp.user_fc)
-                .field("key", &comp.key)
-                .field("scope", &comp.scope)
-                .finish(),
+            VNode::PhantomNode(ph) => match ph {
+                PhantomNode::Fragment(frag) => s
+                    .debug_struct("VNode::Fragment")
+                    .field("children", &frag.children)
+                    .finish(),
+                PhantomNode::Component(comp) => s
+                    .debug_struct("VNode::Component")
+                    .field("name", &comp.fn_name)
+                    .field("fnptr", &comp.user_fc)
+                    .field("key", &comp.key)
+                    .field("scope", &comp.scope)
+                    .finish(),
+            },
+            VNode::RenderedNode(r) => match r.inner {
+                RenderedNodeInner::Element(el) => s
+                    .debug_struct("VNode::Element")
+                    .field("name", &el.tag)
+                    .field("key", &el.key)
+                    .field("attrs", &el.attributes)
+                    .field("children", &el.children)
+                    .field("id", &r.id)
+                    .finish(),
+                RenderedNodeInner::Text(t) => s
+                    .debug_struct("VNode::Text")
+                    .field("text", &t.text)
+                    .field("id", &r.id)
+                    .finish(),
+                RenderedNodeInner::Placeholder(t) => s
+                    .debug_struct("VNode::Placholder")
+                    .field("id", &r.id)
+                    .finish(),
+            },
         }
     }
 }
@@ -225,9 +243,6 @@ pub struct VPlaceholder {
 
 /// A bump-allocated string slice and metadata.
 pub struct VText<'src> {
-    /// The [`ElementId`] of the VText.
-    pub id: Cell<Option<ElementId>>,
-
     /// The text of the VText.
     pub text: &'src str,
 
@@ -516,11 +531,13 @@ impl<'a> NodeFactory<'a> {
 
     /// Directly pass in text blocks without the need to use the format_args macro.
     pub fn static_text(&self, text: &'static str) -> VNode<'a> {
-        VNode::Text(self.bump.alloc(VText {
+        VNode::RenderedNode(RenderedNode {
+            inner: RenderedNodeInner::Text(self.bump.alloc(VText {
+                text,
+                is_static: true,
+            })),
             id: empty_cell(),
-            text,
-            is_static: true,
-        }))
+        })
     }
 
     /// Parses a lazy text Arguments and returns a string and a flag indicating if the text is 'static
@@ -543,11 +560,10 @@ impl<'a> NodeFactory<'a> {
     pub fn text(&self, args: Arguments) -> VNode<'a> {
         let (text, is_static) = self.raw_text(args);
 
-        VNode::Text(self.bump.alloc(VText {
-            text,
-            is_static,
+        VNode::RenderedNode(RenderedNode {
+            inner: RenderedNodeInner::Text(self.bump.alloc(VText { text, is_static })),
             id: empty_cell(),
-        }))
+        })
     }
 
     /// Create a new [`VNode::Element`]
@@ -589,7 +605,7 @@ impl<'a> NodeFactory<'a> {
             items.listeners.push(long_listener);
         }
 
-        VNode::Element(self.bump.alloc(VElement {
+        let el = self.bump.alloc(VElement {
             tag: tag_name,
             key,
             namespace,
@@ -598,7 +614,11 @@ impl<'a> NodeFactory<'a> {
             children,
             id: empty_cell(),
             parent: empty_cell(),
-        }))
+        });
+        VNode::RenderedNode(RenderedNode {
+            inner: RenderedNodeInner::Element(el),
+            id: empty_cell(),
+        })
     }
 
     /// Create a new [`Attribute`]
@@ -672,7 +692,7 @@ impl<'a> NodeFactory<'a> {
             self.scope.items.borrow_mut().borrowed_props.push(vcomp);
         }
 
-        VNode::Component(vcomp)
+        VNode::PhantomNode(PhantomNode::Component(vcomp))
     }
 
     /// Create a new [`Listener`]
@@ -696,12 +716,18 @@ impl<'a> NodeFactory<'a> {
         }
 
         if nodes.is_empty() {
-            VNode::Placeholder(self.bump.alloc(VPlaceholder { id: empty_cell() }))
+            let placeholder =
+                RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder { id: empty_cell() }));
+            VNode::RenderedNode(RenderedNode {
+                id: empty_cell(),
+                inner: placeholder,
+            })
         } else {
-            VNode::Fragment(self.bump.alloc(VFragment {
+            let fragment = PhantomNode::Fragment(self.bump.alloc(VFragment {
                 children: nodes.into_bump_slice(),
                 key: None,
-            }))
+            }));
+            VNode::PhantomNode(fragment)
         }
     }
 
@@ -717,7 +743,12 @@ impl<'a> NodeFactory<'a> {
         }
 
         if nodes.is_empty() {
-            VNode::Placeholder(self.bump.alloc(VPlaceholder { id: empty_cell() }))
+            let placeholder =
+                RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder { id: empty_cell() }));
+            VNode::RenderedNode(RenderedNode {
+                id: empty_cell(),
+                inner: placeholder,
+            })
         } else {
             let children = nodes.into_bump_slice();
 
@@ -738,10 +769,11 @@ impl<'a> NodeFactory<'a> {
                 );
             }
 
-            VNode::Fragment(self.bump.alloc(VFragment {
+            let fragment = PhantomNode::Fragment(self.bump.alloc(VFragment {
                 children,
                 key: None,
-            }))
+            }));
+            VNode::PhantomNode(fragment)
         }
     }
 
@@ -757,16 +789,21 @@ impl<'a> NodeFactory<'a> {
         }
 
         if nodes.is_empty() {
-            Some(VNode::Placeholder(
-                self.bump.alloc(VPlaceholder { id: empty_cell() }),
-            ))
+            let placeholder =
+                RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder { id: empty_cell() }));
+            Some(VNode::RenderedNode(RenderedNode {
+                id: empty_cell(),
+                inner: placeholder,
+            }))
         } else {
             let children = nodes.into_bump_slice();
 
-            Some(VNode::Fragment(self.bump.alloc(VFragment {
-                children,
-                key: None,
-            })))
+            Some(VNode::PhantomNode(PhantomNode::Fragment(self.bump.alloc(
+                VFragment {
+                    children,
+                    key: None,
+                },
+            ))))
         }
     }
 
@@ -846,7 +883,12 @@ impl<'a> IntoVNode<'a> for Option<LazyNodes<'a, '_>> {
     fn into_vnode(self, cx: NodeFactory<'a>) -> VNode<'a> {
         match self {
             Some(lazy) => lazy.call(cx),
-            None => VNode::Placeholder(cx.bump.alloc(VPlaceholder { id: empty_cell() })),
+            None => VNode::RenderedNode(RenderedNode {
+                id: empty_cell(),
+                inner: RenderedNodeInner::Placeholder(
+                    cx.bump.alloc(VPlaceholder { id: empty_cell() }),
+                ),
+            }),
         }
     }
 }
