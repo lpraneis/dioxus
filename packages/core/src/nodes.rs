@@ -28,6 +28,7 @@ pub enum VNode<'src> {
 }
 
 struct RenderedNode<'src> {
+    /// The [`ElementId`] of the [`RenderedNode`].
     id: Cell<Option<ElementId>>,
     inner: RenderedNodeInner<'src>,
 }
@@ -195,19 +196,13 @@ impl Debug for VNode<'_> {
                     .field("name", &el.tag)
                     .field("key", &el.key)
                     .field("attrs", &el.attributes)
-                    .field("children", &el.children)
-                    .field("id", &r.id)
-                    .finish(),
-                RenderedNodeInner::Text(t) => s
-                    .debug_struct("VNode::Text")
-                    .field("text", &t.text)
-                    .field("id", &r.id)
-                    .finish(),
-                RenderedNodeInner::Placeholder(t) => s
-                    .debug_struct("VNode::Placholder")
-                    .field("id", &r.id)
-                    .finish(),
-            },
+                    .field("children", &el.children),
+                RenderedNodeInner::Text(t) => s.debug_struct("VNode::Text").field("text", &t.text),
+
+                RenderedNodeInner::Placeholder(t) => &mut s.debug_struct("VNode::Placholder"),
+            }
+            .field("id", &r.id)
+            .finish(),
         }
     }
 }
@@ -236,10 +231,7 @@ fn empty_cell() -> Cell<Option<ElementId>> {
 }
 
 /// A placeholder node only generated when Fragments don't have any children.
-pub struct VPlaceholder {
-    /// The [`ElementId`] of the placeholder.
-    pub id: Cell<Option<ElementId>>,
-}
+pub struct VPlaceholder;
 
 /// A bump-allocated string slice and metadata.
 pub struct VText<'src> {
@@ -264,9 +256,6 @@ pub struct VFragment<'src> {
 
 /// An element like a "div" with children, listeners, and attributes.
 pub struct VElement<'a> {
-    /// The [`ElementId`] of the VText.
-    pub id: Cell<Option<ElementId>>,
-
     /// The key of the element to be used during keyed diffing.
     pub key: Option<&'a str>,
 
@@ -301,7 +290,6 @@ impl Debug for VElement<'_> {
             .field("tag_name", &self.tag)
             .field("namespace", &self.namespace)
             .field("key", &self.key)
-            .field("id", &self.id)
             .field("parent", &self.parent)
             .field("listeners", &self.listeners.len())
             .field("attributes", &self.attributes)
@@ -612,7 +600,6 @@ impl<'a> NodeFactory<'a> {
             listeners,
             attributes,
             children,
-            id: empty_cell(),
             parent: empty_cell(),
         });
         VNode::RenderedNode(RenderedNode {
@@ -716,8 +703,7 @@ impl<'a> NodeFactory<'a> {
         }
 
         if nodes.is_empty() {
-            let placeholder =
-                RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder { id: empty_cell() }));
+            let placeholder = RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder));
             VNode::RenderedNode(RenderedNode {
                 id: empty_cell(),
                 inner: placeholder,
@@ -743,8 +729,7 @@ impl<'a> NodeFactory<'a> {
         }
 
         if nodes.is_empty() {
-            let placeholder =
-                RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder { id: empty_cell() }));
+            let placeholder = RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder));
             VNode::RenderedNode(RenderedNode {
                 id: empty_cell(),
                 inner: placeholder,
@@ -789,8 +774,7 @@ impl<'a> NodeFactory<'a> {
         }
 
         if nodes.is_empty() {
-            let placeholder =
-                RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder { id: empty_cell() }));
+            let placeholder = RenderedNodeInner::Placeholder(self.bump.alloc(VPlaceholder));
             Some(VNode::RenderedNode(RenderedNode {
                 id: empty_cell(),
                 inner: placeholder,
@@ -885,9 +869,7 @@ impl<'a> IntoVNode<'a> for Option<LazyNodes<'a, '_>> {
             Some(lazy) => lazy.call(cx),
             None => VNode::RenderedNode(RenderedNode {
                 id: empty_cell(),
-                inner: RenderedNodeInner::Placeholder(
-                    cx.bump.alloc(VPlaceholder { id: empty_cell() }),
-                ),
+                inner: RenderedNodeInner::Placeholder(cx.bump.alloc(VPlaceholder)),
             }),
         }
     }
