@@ -147,11 +147,7 @@ impl<S: State> RealDom<S> {
                         self.node_stack.push(root as usize)
                     }
 
-                    NewEventListener {
-                        event_name,
-                        scope: _,
-                        root,
-                    } => {
+                    NewEventListener { event_name, root } => {
                         nodes_updated.push((root as usize, NodeMask::new().with_listeners()));
                         if let Some(v) = self.nodes_listening.get_mut(event_name) {
                             v.insert(root as usize);

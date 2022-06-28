@@ -12,7 +12,7 @@ use crate::{
 /// - Can handle event bubbling
 /// - Can contain components that add interactivity to the dom
 
-trait Diffable<'a> {
+pub(crate) trait Diffable<'a> {
     type Regestry;
 
     fn create(&self, registry: &mut Self::Regestry);
@@ -23,7 +23,7 @@ trait Diffable<'a> {
 }
 
 pub struct VDomRegestry<'a> {
-    nodes_to_place: usize,
+    pub(crate) nodes_to_place: usize,
     pub(crate) mutations: Mutations<'a>,
     scopes: &'a ScopeArena,
 }

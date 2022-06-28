@@ -66,7 +66,7 @@ fn events_generate() {
         edits.edits,
         [
             CreateElement { tag: "div", root: 1 },
-            NewEventListener { event_name: "click", scope: ScopeId(0), root: 1 },
+            NewEventListener { event_name: "click", root: 1 },
             CreateElement { tag: "div", root: 2 },
             CreateTextNode { text: "nested", root: 3 },
             AppendChildren { many: 1 },

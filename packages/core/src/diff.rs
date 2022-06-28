@@ -92,7 +92,7 @@
 //!  - <https://hacks.mozilla.org/2019/03/fast-bump-allocated-virtual-doms-with-rust-and-wasm/>
 
 use crate::{
-    diffable::VDomRegestry,
+    diffable::{Diffable, VDomRegestry},
     innerlude::{
         AnyProps, ElementId, ScopeArena, ScopeId, VComponent, VElement, VFragment, VNode,
         VPlaceholder, VText,
@@ -162,6 +162,7 @@ impl<'b> DiffState<'b> {
                 Component(_) | Fragment(_) | Text(_) | Element(_) | Placeholder(_),
             ) => self.replace_node(old_node, new_node),
         }
+        new_node.diff(old_node, &mut self.vdom_registry);
     }
 
     pub fn create_node(&mut self, node: &'b VNode<'b>) {
@@ -172,6 +173,7 @@ impl<'b> DiffState<'b> {
             VNode::Fragment(frag) => self.create_fragment_node(frag),
             VNode::Component(component) => self.create_component_node(*component),
         }
+        node.create(&mut self.vdom_registry);
     }
 
     fn create_text_node(&mut self, text: &'b VText<'b>, node: &'b VNode<'b>) {
@@ -213,7 +215,7 @@ impl<'b> DiffState<'b> {
     }
 
     fn create_fragment_node(&mut self, frag: &'b VFragment<'b>) {
-        self.create_children(frag.children)
+        self.create_children(frag.children);
     }
 
     fn create_component_node(&mut self, vcomponent: &'b VComponent<'b>) {
@@ -255,18 +257,14 @@ impl<'b> DiffState<'b> {
 
         self.enter_scope(new_idx);
 
-        let created = {
-            // Run the scope for one iteration to initialize it
-            self.scopes.run_scope(new_idx);
+        // Run the scope for one iteration to initialize it
+        self.scopes.run_scope(new_idx);
 
-            // Take the node that was just generated from running the component
-            let nextnode = self.scopes.fin_head(new_idx);
-            self.create_node(nextnode)
-        };
+        // Take the node that was just generated from running the component
+        let nextnode = self.scopes.fin_head(new_idx);
+        self.create_node(nextnode);
 
         self.leave_scope();
-
-        created
     }
 
     pub(crate) fn diff_text_nodes(
@@ -874,6 +872,7 @@ impl<'b> DiffState<'b> {
 
     pub fn remove_nodes(&mut self, nodes: impl IntoIterator<Item = &'b VNode<'b>>) {
         for node in nodes {
+            node.destroy(&mut self.vdom_registry);
             match node {
                 VNode::Text(t) => {
                     // this check exists because our null node will be removed but does not have an ID

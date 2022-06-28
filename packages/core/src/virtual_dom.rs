@@ -510,91 +510,95 @@ impl VirtualDom {
         committed_mutations
     }
 
-    // /// Performs a *full* rebuild of the virtual dom, returning every edit required to generate the actual dom from scratch.
-    // ///
-    // /// The diff machine expects the RealDom's stack to be the root of the application.
-    // ///
-    // /// Tasks will not be polled with this method, nor will any events be processed from the event queue. Instead, the
-    // /// root component will be ran once and then diffed. All updates will flow out as mutations.
-    // ///
-    // /// All state stored in components will be completely wiped away.
-    // ///
-    // /// # Example
-    // /// ```rust, ignore
-    // /// static App: Component = |cx|  cx.render(rsx!{ "hello world" });
-    // /// let mut dom = VirtualDom::new();
-    // /// let edits = dom.rebuild();
-    // ///
-    // /// apply_edits(edits);
-    // /// ```
-    // pub fn rebuild(&mut self) -> Mutations {
-    //     let scope_id = ScopeId(0);
-    //     let mut diff_state = DiffState::new(&self.scopes);
+    /// Performs a *full* rebuild of the virtual dom, returning every edit required to generate the actual dom from scratch.
+    ///
+    /// The diff machine expects the RealDom's stack to be the root of the application.
+    ///
+    /// Tasks will not be polled with this method, nor will any events be processed from the event queue. Instead, the
+    /// root component will be ran once and then diffed. All updates will flow out as mutations.
+    ///
+    /// All state stored in components will be completely wiped away.
+    ///
+    /// # Example
+    /// ```rust, ignore
+    /// static App: Component = |cx|  cx.render(rsx!{ "hello world" });
+    /// let mut dom = VirtualDom::new();
+    /// let edits = dom.rebuild();
+    ///
+    /// apply_edits(edits);
+    /// ```
+    pub fn rebuild(&mut self) -> Mutations {
+        let scope_id = ScopeId(0);
+        let mut diff_state = DiffState::new(&self.scopes);
 
-    //     self.scopes.run_scope(scope_id);
+        self.scopes.run_scope(scope_id);
 
-    //     diff_state.element_stack.push(ElementId(0));
-    //     diff_state.scope_stack.push(scope_id);
+        diff_state.element_stack.push(ElementId(0));
+        diff_state.scope_stack.push(scope_id);
 
-    //     let node = self.scopes.fin_head(scope_id);
-    //     let created = diff_state.create_node(node);
+        let node = self.scopes.fin_head(scope_id);
+        diff_state.create_node(node);
+        let created = diff_state.vdom_registry.nodes_to_place;
 
-    //     diff_state.mutations.append_children(created as u32);
+        diff_state
+            .vdom_registry
+            .mutations
+            .append_children(created as u32);
 
-    //     self.dirty_scopes.clear();
-    //     assert!(self.dirty_scopes.is_empty());
+        self.dirty_scopes.clear();
+        assert!(self.dirty_scopes.is_empty());
 
-    //     diff_state.mutations
-    // }
+        diff_state.vdom_registry.mutations
+    }
 
-    // /// Compute a manual diff of the VirtualDom between states.
-    // ///
-    // /// This can be useful when state inside the DOM is remotely changed from the outside, but not propagated as an event.
-    // ///
-    // /// In this case, every component will be diffed, even if their props are memoized. This method is intended to be used
-    // /// to force an update of the DOM when the state of the app is changed outside of the app.
-    // ///
-    // /// To force a reflow of the entire VirtualDom, use `ScopeId(0)` as the scope_id.
-    // ///
-    // /// # Example
-    // /// ```rust, ignore
-    // /// #[derive(PartialEq, Props)]
-    // /// struct AppProps {
-    // ///     value: Shared<&'static str>,
-    // /// }
-    // ///
-    // /// static App: Component<AppProps> = |cx| {
-    // ///     let val = cx.value.borrow();
-    // ///     cx.render(rsx! { div { "{val}" } })
-    // /// };
-    // ///
-    // /// let value = Rc::new(RefCell::new("Hello"));
-    // /// let mut dom = VirtualDom::new_with_props(App, AppProps { value: value.clone(), });
-    // ///
-    // /// let _ = dom.rebuild();
-    // ///
-    // /// *value.borrow_mut() = "goodbye";
-    // ///
-    // /// let edits = dom.hard_diff(ScopeId(0));
-    // /// ```
-    // pub fn hard_diff(&mut self, scope_id: ScopeId) -> Mutations {
-    //     let mut diff_machine = DiffState::new(&self.scopes);
-    //     self.scopes.run_scope(scope_id);
+    /// Compute a manual diff of the VirtualDom between states.
+    ///
+    /// This can be useful when state inside the DOM is remotely changed from the outside, but not propagated as an event.
+    ///
+    /// In this case, every component will be diffed, even if their props are memoized. This method is intended to be used
+    /// to force an update of the DOM when the state of the app is changed outside of the app.
+    ///
+    /// To force a reflow of the entire VirtualDom, use `ScopeId(0)` as the scope_id.
+    ///
+    /// # Example
+    /// ```rust, ignore
+    /// #[derive(PartialEq, Props)]
+    /// struct AppProps {
+    ///     value: Shared<&'static str>,
+    /// }
+    ///
+    /// static App: Component<AppProps> = |cx| {
+    ///     let val = cx.value.borrow();
+    ///     cx.render(rsx! { div { "{val}" } })
+    /// };
+    ///
+    /// let value = Rc::new(RefCell::new("Hello"));
+    /// let mut dom = VirtualDom::new_with_props(App, AppProps { value: value.clone(), });
+    ///
+    /// let _ = dom.rebuild();
+    ///
+    /// *value.borrow_mut() = "goodbye";
+    ///
+    /// let edits = dom.hard_diff(ScopeId(0));
+    /// ```
+    pub fn hard_diff(&mut self, scope_id: ScopeId) -> Mutations {
+        let mut diff_machine = DiffState::new(&self.scopes);
+        self.scopes.run_scope(scope_id);
 
-    //     let (old, new) = (
-    //         diff_machine.scopes.wip_head(scope_id),
-    //         diff_machine.scopes.fin_head(scope_id),
-    //     );
+        let (old, new) = (
+            diff_machine.scopes.wip_head(scope_id),
+            diff_machine.scopes.fin_head(scope_id),
+        );
 
-    //     diff_machine.force_diff = true;
-    //     diff_machine.scope_stack.push(scope_id);
-    //     let scope = diff_machine.scopes.get_scope(scope_id).unwrap();
-    //     diff_machine.element_stack.push(scope.container);
+        diff_machine.force_diff = true;
+        diff_machine.scope_stack.push(scope_id);
+        let scope = diff_machine.scopes.get_scope(scope_id).unwrap();
+        diff_machine.element_stack.push(scope.container);
 
-    //     diff_machine.diff_node(old, new);
+        diff_machine.diff_node(old, new);
 
-    //     diff_machine.mutations
-    // }
+        diff_machine.vdom_registry.mutations
+    }
 
     // /// Renders an `rsx` call into the Base Scope's allocator.
     // ///
