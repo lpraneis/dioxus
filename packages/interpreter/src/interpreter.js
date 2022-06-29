@@ -136,6 +136,14 @@ export class Interpreter {
   }
   NewEventListener(event_name, root, handler, bubbles) {
     const element = this.nodes[root];
+    let listener_count_attr = element.getAttribute("data-dioxus-listener-count");
+    if (listener_count_attr) {
+      let listener_count = parseInt(listener_count_attr) + 1;
+      element.setAttribute("data-dioxus-listener-count", listener_count);
+    }
+    else {
+      element.setAttribute("data-dioxus-listener-count", 1);
+    }
     element.setAttribute("data-dioxus-id", `${root}`);
     if (bubbles) {
       this.listeners.createBubbling(event_name, handler);
@@ -146,12 +154,17 @@ export class Interpreter {
   }
   RemoveEventListener(root, event_name, bubbles) {
     const element = this.nodes[root];
-    element.removeAttribute(`data-dioxus-id`);
     if (bubbles) {
       this.listeners.removeBubbling(event_name)
     }
     else {
       this.listeners.removeNonBubbling(element, event_name);
+    }
+    let listener_count_attr = element.getAttribute("data-dioxus-listener-count");
+    let listener_count = parseInt(listener_count_attr) - 1;
+    element.setAttribute("data-dioxus-listener-count", listener_count);
+    if (listener_count <= 0) {
+      element.removeAttribute(`data-dioxus-id`);
     }
   }
   SetText(root, text) {
