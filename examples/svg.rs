@@ -82,7 +82,6 @@ pub fn Die<'a>(cx: Scope<'a, DieProps<'a>>) -> Element {
       svg {
         onclick: move |e| cx.props.onclick.call(e),
         prevent_default: "onclick",
-        "dioxus-prevent-default": "onclick",
         class: "die",
         view_box: "-1000 -1000 2000 2000",
 
