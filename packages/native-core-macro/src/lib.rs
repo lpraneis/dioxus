@@ -101,6 +101,7 @@ fn impl_derive_macro(ast: &syn::DeriveInput) -> TokenStream {
                             }
                         }
 
+                        #[derive(Clone, Copy)]
                         struct MembersDirty {
                             #(#members: bool, )*
                         }
@@ -113,18 +114,27 @@ fn impl_derive_macro(ast: &syn::DeriveInput) -> TokenStream {
                             fn any(&self) -> bool {
                                 #(self.#members || )* false
                             }
+
+                            fn union(self, other: Self) -> Self {
+                                Self {#(#members: self.#members || other.#members),*}
+                            }
                         }
 
                         let mut dirty_elements = fxhash::FxHashSet::default();
                         // the states of any elements that are dirty
-                        let mut states = fxhash::FxHashMap::default();
+                        let mut states: fxhash::FxHashMap<dioxus_core::ElementId, MembersDirty> = fxhash::FxHashMap::default();
 
                         for (id, mask) in dirty {
                             let members_dirty = MembersDirty {
                                 #(#members: #member_types::NODE_MASK.overlaps(mask),)*
                             };
                             if members_dirty.any(){
-                                states.insert(*id, members_dirty);
+                                if let Some(state) = states.get_mut(id){
+                                    *state = state.union(members_dirty);
+                                }
+                                else{
+                                    states.insert(*id, members_dirty);
+                                }
                             }
                             dirty_elements.insert(*id);
                         }
