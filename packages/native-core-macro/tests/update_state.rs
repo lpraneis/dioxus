@@ -136,7 +136,7 @@ impl ParentDepState for PushedDownStateTester {
 struct NodeStateTester(Option<String>, Vec<(String, String)>);
 impl NodeDepState<()> for NodeStateTester {
     type Ctx = u32;
-    const NODE_MASK: NodeMask = NodeMask::new_with_attrs(AttributeMask::All).with_tag();
+    const NODE_MASK: NodeMask = NodeMask::new_with_attributes(AttributeMask::All).with_tag();
     fn reduce(&mut self, node: NodeView, _sibling: (), ctx: &Self::Ctx) -> bool {
         assert_eq!(*ctx, 42);
         *self = NodeStateTester(

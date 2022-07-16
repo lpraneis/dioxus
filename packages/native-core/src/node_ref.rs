@@ -2,6 +2,7 @@ use dioxus_core::*;
 
 use crate::state::union_ordered_iter;
 
+/// A view into a [VNode] with limited access.
 #[derive(Debug)]
 pub struct NodeView<'a> {
     inner: &'a VNode<'a>,
@@ -19,41 +20,53 @@ impl<'a> NodeView<'a> {
         }
     }
 
+    /// Get the id of the node
     pub fn id(&self) -> ElementId {
         self.inner.mounted_id()
     }
 
+    /// Get the tag of the node if the tag is enabled in the mask
     pub fn tag(&self) -> Option<&'a str> {
-        self.mask.tag.then(|| self.el().map(|el| el.tag)).flatten()
-    }
-
-    pub fn namespace(&self) -> Option<&'a str> {
         self.mask
-            .namespace
-            .then(|| self.el().and_then(|el| el.namespace))
+            .tag
+            .then(|| self.try_element().map(|el| el.tag))
             .flatten()
     }
 
+    /// Get the tag of the node if the namespace is enabled in the mask
+    pub fn namespace(&self) -> Option<&'a str> {
+        self.mask
+            .namespace
+            .then(|| self.try_element().and_then(|el| el.namespace))
+            .flatten()
+    }
+
+    /// Get any attributes that are enabled in the mask
     pub fn attributes(&self) -> impl Iterator<Item = &Attribute<'a>> {
-        self.el()
+        self.try_element()
             .map(|el| el.attributes)
             .unwrap_or_default()
             .iter()
             .filter(|a| self.mask.attritutes.contains_attribute(a.name))
     }
 
+    /// Get the text if it is enabled in the mask
     pub fn text(&self) -> Option<&str> {
         self.mask
             .text
-            .then(|| self.txt().map(|txt| txt.text))
+            .then(|| self.try_text().map(|txt| txt.text))
             .flatten()
     }
 
+    /// Get the listeners if it is enabled in the mask
     pub fn listeners(&self) -> &'a [Listener<'a>] {
-        self.el().map(|el| el.listeners).unwrap_or_default()
+        self.try_element()
+            .map(|el| el.listeners)
+            .unwrap_or_default()
     }
 
-    fn el(&self) -> Option<&'a VElement<'a>> {
+    /// Try to get the underlying element.
+    fn try_element(&self) -> Option<&'a VElement<'a>> {
         if let VNode::Element(el) = &self.inner {
             Some(el)
         } else {
@@ -61,7 +74,8 @@ impl<'a> NodeView<'a> {
         }
     }
 
-    fn txt(&self) -> Option<&'a VText<'a>> {
+    /// Try to get the underlying text node.
+    fn try_text(&self) -> Option<&'a VText<'a>> {
         if let VNode::Text(txt) = &self.inner {
             Some(txt)
         } else {
@@ -70,10 +84,13 @@ impl<'a> NodeView<'a> {
     }
 }
 
+/// A mask that contains a list of attributes that are visible.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum AttributeMask {
     All,
+    /// A list of attribute names that are visible, this list must be sorted
     Dynamic(Vec<&'static str>),
+    /// A list of attribute names that are visible, this list must be sorted
     Static(&'static [&'static str]),
 }
 
@@ -92,6 +109,7 @@ impl AttributeMask {
         Self::Dynamic(vec![new])
     }
 
+    /// Ensure the attribute list is sorted.
     pub fn verify(&self) {
         match &self {
             AttributeMask::Static(attrs) => debug_assert!(
@@ -106,6 +124,7 @@ impl AttributeMask {
         }
     }
 
+    /// Combine two attribute masks
     pub fn union(&self, other: &Self) -> Self {
         let new = match (self, other) {
             (AttributeMask::Dynamic(s), AttributeMask::Dynamic(o)) => AttributeMask::Dynamic(
@@ -126,6 +145,7 @@ impl AttributeMask {
         new
     }
 
+    /// Check if two attribute masks overlap
     fn overlaps(&self, other: &Self) -> bool {
         fn overlaps_iter(
             self_iter: impl Iterator<Item = &'static str>,
@@ -177,7 +197,6 @@ impl Default for AttributeMask {
 
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct NodeMask {
-    // must be sorted
     attritutes: AttributeMask,
     tag: bool,
     namespace: bool,
@@ -187,10 +206,11 @@ pub struct NodeMask {
 
 impl NodeMask {
     pub const NONE: Self = Self::new();
-    pub const ALL: Self = Self::new_with_attrs(AttributeMask::All)
+    pub const ALL: Self = Self::new_with_attributes(AttributeMask::All)
         .with_text()
         .with_element();
 
+    /// check if two masks overlap
     pub fn overlaps(&self, other: &Self) -> bool {
         (self.tag && other.tag)
             || (self.namespace && other.namespace)
@@ -199,6 +219,7 @@ impl NodeMask {
             || (self.listeners && other.listeners)
     }
 
+    /// combine two masks
     pub fn union(&self, other: &Self) -> Self {
         Self {
             attritutes: self.attritutes.union(&other.attritutes),
@@ -209,7 +230,7 @@ impl NodeMask {
         }
     }
 
-    pub const fn new_with_attrs(attritutes: AttributeMask) -> Self {
+    pub const fn new_with_attributes(attritutes: AttributeMask) -> Self {
         Self {
             attritutes,
             tag: false,
@@ -220,7 +241,7 @@ impl NodeMask {
     }
 
     pub const fn new() -> Self {
-        Self::new_with_attrs(AttributeMask::NONE)
+        Self::new_with_attributes(AttributeMask::NONE)
     }
 
     pub const fn with_tag(mut self) -> Self {

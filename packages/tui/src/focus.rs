@@ -65,7 +65,7 @@ pub(crate) struct Focus {
 impl NodeDepState<()> for Focus {
     type Ctx = ();
     const NODE_MASK: NodeMask =
-        NodeMask::new_with_attrs(AttributeMask::Static(FOCUS_ATTRIBUTES)).with_listeners();
+        NodeMask::new_with_attributes(AttributeMask::Static(FOCUS_ATTRIBUTES)).with_listeners();
 
     fn reduce(&mut self, node: NodeView<'_>, _sibling: (), _: &Self::Ctx) -> bool {
         let new = Focus {

@@ -49,7 +49,7 @@ impl NodeDepState<()> for PreventDefault {
     type Ctx = ();
 
     const NODE_MASK: dioxus_native_core::node_ref::NodeMask =
-        dioxus_native_core::node_ref::NodeMask::new_with_attrs(
+        dioxus_native_core::node_ref::NodeMask::new_with_attributes(
             dioxus_native_core::node_ref::AttributeMask::Static(&sorted_str_slice!([
                 "dioxus-prevent-default"
             ])),

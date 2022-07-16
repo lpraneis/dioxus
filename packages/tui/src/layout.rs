@@ -44,7 +44,7 @@ impl ChildDepState for TaffyLayout {
     type DepState = Self;
     // use tag to force this to be called when a node is built
     const NODE_MASK: NodeMask =
-        NodeMask::new_with_attrs(AttributeMask::Static(SORTED_LAYOUT_ATTRS))
+        NodeMask::new_with_attributes(AttributeMask::Static(SORTED_LAYOUT_ATTRS))
             .with_text()
             .with_tag();
 
