@@ -118,7 +118,7 @@ pub enum DomEdit<'bump> {
         tag: &'bump str,
 
         /// The namespace of the node (like `SVG`)
-        ns: &'static str,
+        ns: &'bump str,
     },
 
     /// Create a new placeholder node.
@@ -131,7 +131,7 @@ pub enum DomEdit<'bump> {
     /// Create a new Event Listener.
     NewEventListener {
         /// The name of the event to listen for.
-        event_name: &'static str,
+        event_name: &'bump str,
 
         /// The ID of the node to attach the listener to.
         scope: ScopeId,
@@ -146,7 +146,7 @@ pub enum DomEdit<'bump> {
         root: u64,
 
         /// The name of the event to remove.
-        event: &'static str,
+        event: &'bump str,
     },
 
     /// Set the textcontent of a node.
@@ -164,7 +164,7 @@ pub enum DomEdit<'bump> {
         root: u64,
 
         /// The name of the attribute to set.
-        field: &'static str,
+        field: &'bump str,
 
         /// The value of the attribute.
         value: AttributeValue<'bump>,
@@ -181,7 +181,7 @@ pub enum DomEdit<'bump> {
         root: u64,
 
         /// The name of the attribute to remove.
-        name: &'static str,
+        name: &'bump str,
 
         /// The namespace of the attribute.
         ns: Option<&'bump str>,
@@ -244,12 +244,7 @@ impl<'a> Mutations<'a> {
         self.edits.push(CreateTextNode { text, root: id });
     }
 
-    pub(crate) fn create_element(
-        &mut self,
-        tag: &'static str,
-        ns: Option<&'static str>,
-        id: ElementId,
-    ) {
+    pub(crate) fn create_element(&mut self, tag: &'a str, ns: Option<&'a str>, id: ElementId) {
         let id = id.as_u64();
         match ns {
             Some(ns) => self.edits.push(CreateElementNs { root: id, ns, tag }),
@@ -263,7 +258,7 @@ impl<'a> Mutations<'a> {
     }
 
     // events
-    pub(crate) fn new_event_listener(&mut self, listener: &Listener, scope: ScopeId) {
+    pub(crate) fn new_event_listener(&mut self, listener: &Listener<'a>, scope: ScopeId) {
         let Listener {
             event,
             mounted_node,
@@ -278,7 +273,7 @@ impl<'a> Mutations<'a> {
             root: element_id,
         });
     }
-    pub(crate) fn remove_event_listener(&mut self, event: &'static str, root: u64) {
+    pub(crate) fn remove_event_listener(&mut self, event: &'a str, root: u64) {
         self.edits.push(RemoveEventListener { event, root });
     }
 
@@ -287,7 +282,7 @@ impl<'a> Mutations<'a> {
         self.edits.push(SetText { text, root });
     }
 
-    pub(crate) fn set_attribute(&mut self, attribute: &'a Attribute<'a>, root: u64) {
+    pub(crate) fn set_attribute(&mut self, attribute: &Attribute<'a>, root: u64) {
         let Attribute {
             name,
             value,
@@ -303,7 +298,7 @@ impl<'a> Mutations<'a> {
         });
     }
 
-    pub(crate) fn remove_attribute(&mut self, attribute: &Attribute, root: u64) {
+    pub(crate) fn remove_attribute(&mut self, attribute: &Attribute<'a>, root: u64) {
         let Attribute {
             name, namespace, ..
         } = attribute;

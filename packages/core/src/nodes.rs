@@ -336,7 +336,7 @@ pub trait DioxusElement {
 #[derive(Clone, Debug)]
 pub struct Attribute<'a> {
     /// The name of the attribute.
-    pub name: &'static str,
+    pub name: &'a str,
 
     /// The value of the attribute.
     pub value: AttributeValue<'a>,
@@ -354,7 +354,7 @@ pub struct Attribute<'a> {
     ///
     /// Doesn't exist in the html spec.
     /// Used in Dioxus to denote "style" tags and other attribute groups.
-    pub namespace: Option<&'static str>,
+    pub namespace: Option<&'a str>,
 }
 
 /// An event listener.
@@ -367,7 +367,7 @@ pub struct Listener<'bump> {
     /// The type of event to listen for.
     ///
     /// IE "click" - whatever the renderer needs to attach the listener by name.
-    pub event: &'static str,
+    pub event: &'bump str,
 
     /// The actual callback that the user specified
     pub(crate) callback: InternalHandler<'bump>,
