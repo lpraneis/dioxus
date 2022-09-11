@@ -42,7 +42,11 @@ impl BodyNode {
 impl Parse for BodyNode {
     fn parse(stream: ParseStream) -> Result<Self> {
         if stream.peek(LitStr) {
-            return Ok(BodyNode::Text(stream.parse()?));
+            if stream.peek2(token::Brace) {
+                return Ok(BodyNode::Element(stream.parse::<Element>()?));
+            } else {
+                return Ok(BodyNode::Text(stream.parse()?));
+            }
         }
 
         let body_stream = stream.fork();

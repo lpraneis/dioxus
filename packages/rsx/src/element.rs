@@ -1,18 +1,45 @@
+use std::fmt::Display;
+
 use super::*;
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, ToTokens, TokenStreamExt};
 use syn::{
     parse::{Parse, ParseBuffer, ParseStream},
+    spanned::Spanned,
     Error, Expr, Ident, LitStr, Result, Token,
 };
+
+#[derive(Eq, PartialEq, Clone)]
+pub enum ElementName {
+    Ident(Ident),
+    LitStr(LitStr),
+}
+
+impl Display for ElementName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElementName::Ident(ident) => write!(f, "{}", ident),
+            ElementName::LitStr(lit_str) => write!(f, "\"{}\"", lit_str.value()),
+        }
+    }
+}
+
+impl Spanned for ElementName {
+    fn span(&self) -> Span {
+        match self {
+            ElementName::Ident(ident) => ident.span(),
+            ElementName::LitStr(lit_str) => lit_str.span(),
+        }
+    }
+}
 
 // =======================================
 // Parse the VNode::Element type
 // =======================================
 #[derive(PartialEq, Eq)]
 pub struct Element {
-    pub name: Ident,
+    pub name: ElementName,
     pub key: Option<LitStr>,
     pub attributes: Vec<ElementAttrNamed>,
     pub children: Vec<BodyNode>,
@@ -21,7 +48,11 @@ pub struct Element {
 
 impl Parse for Element {
     fn parse(stream: ParseStream) -> Result<Self> {
-        let el_name = Ident::parse(stream)?;
+        let el_name = if stream.peek(LitStr) {
+            ElementName::LitStr(stream.parse::<LitStr>()?)
+        } else {
+            ElementName::Ident(stream.parse::<Ident>()?)
+        };
 
         // parse the guts
         let content: ParseBuffer;
@@ -178,15 +209,31 @@ impl ToTokens for Element {
             .iter()
             .filter(|f| !matches!(f.attr, ElementAttr::EventTokens { .. }));
 
-        tokens.append_all(quote! {
-            __cx.element(
-                dioxus_elements::#name,
-                __cx.bump().alloc([ #(#listeners),* ]),
-                __cx.bump().alloc([ #(#attr),* ]),
-                __cx.bump().alloc([ #(#children),* ]),
-                #key,
-            )
-        });
+        match name {
+            ElementName::Ident(name) => {
+                tokens.append_all(quote! {
+                    __cx.element(
+                        dioxus_elements::#name,
+                        __cx.bump().alloc([ #(#listeners),* ]),
+                        __cx.bump().alloc([ #(#attr),* ]),
+                        __cx.bump().alloc([ #(#children),* ]),
+                        #key,
+                    )
+                });
+            }
+            ElementName::LitStr(name) => {
+                tokens.append_all(quote! {
+                    __cx.raw_element(
+                        #name,
+                        None,
+                        __cx.bump().alloc([ #(#listeners),* ]),
+                        __cx.bump().alloc([ #(#attr),* ]),
+                        __cx.bump().alloc([ #(#children),* ]),
+                        #key,
+                    )
+                });
+            }
+        }
     }
 }
 
@@ -233,7 +280,7 @@ impl ElementAttr {
 
 #[derive(PartialEq, Eq)]
 pub struct ElementAttrNamed {
-    pub el_name: Ident,
+    pub el_name: ElementName,
     pub attr: ElementAttr,
 }
 
@@ -242,16 +289,30 @@ impl ToTokens for ElementAttrNamed {
         let ElementAttrNamed { el_name, attr } = self;
 
         tokens.append_all(match attr {
-            ElementAttr::AttrText { name, value } => {
-                quote! {
-                    dioxus_elements::#el_name.#name(__cx, format_args_f!(#value))
+            ElementAttr::AttrText { name, value } => match el_name {
+                ElementName::Ident(el_name) => {
+                    quote! {
+                        dioxus_elements::#el_name.#name(__cx, format_args_f!(#value))
+                    }
                 }
-            }
-            ElementAttr::AttrExpression { name, value } => {
-                quote! {
-                    dioxus_elements::#el_name.#name(__cx, #value)
+                ElementName::LitStr(_) => {
+                    quote! {
+                        compile_error!("cannot use non-literal attribute with a literal element")
+                    }
                 }
-            }
+            },
+            ElementAttr::AttrExpression { name, value } => match el_name {
+                ElementName::Ident(el_name) => {
+                    quote! {
+                        dioxus_elements::#el_name.#name(__cx, #value)
+                    }
+                }
+                ElementName::LitStr(_) => {
+                    quote! {
+                        compile_error!("cannot use non-literal attribute with a literal element")
+                    }
+                }
+            },
             ElementAttr::CustomAttrText { name, value } => {
                 quote! {
                     __cx.attr( #name, format_args_f!(#value), None, false )

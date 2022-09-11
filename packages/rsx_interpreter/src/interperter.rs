@@ -3,6 +3,7 @@ use dioxus_rsx::{BodyNode, CallBody, ElementAttr, IfmtInput, Segment};
 use quote::ToTokens;
 use quote::__private::Span;
 use std::str::FromStr;
+use syn::spanned::Spanned;
 use syn::{parse2, parse_str, Expr};
 
 use crate::captuered_context::{CapturedContext, IfmtArgs};
@@ -76,8 +77,11 @@ fn build_node<'a>(
         }
         BodyNode::Element(el) => {
             let attributes: &mut Vec<Attribute> = bump.alloc(Vec::new());
-            let tag = &el.name.to_string();
-            if let Some((tag, ns)) = element_to_static_str(tag) {
+            let tag = match &el.name {
+                dioxus_rsx::ElementName::Ident(name) => name.to_string(),
+                dioxus_rsx::ElementName::LitStr(name) => name.value(),
+            };
+            if let Some((tag, ns)) = element_to_static_str(&tag) {
                 for attr in &el.attributes {
                     match &attr.attr {
                         ElementAttr::AttrText { .. } | ElementAttr::CustomAttrText { .. } => {
