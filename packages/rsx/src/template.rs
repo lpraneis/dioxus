@@ -121,8 +121,20 @@ impl ToTokens for TemplateElementBuilder {
         };
         tokens.append_all(quote! {
             TemplateElement::new(
-                dioxus_elements::#tag::TAG_NAME,
-                dioxus_elements::#tag::NAME_SPACE,
+                {
+                    mod __inner {
+                        use super::dioxus_elements::*;
+                        pub type  __el = #tag;
+                    }
+                    __inner::__el::TAG_NAME
+                },
+                {
+                    mod __inner {
+                        use super::dioxus_elements::*;
+                        pub type  __el = #tag;
+                    }
+                    __inner::__el::NAME_SPACE
+                },
                 &[#(#attributes),*],
                 &[#(#children),*],
                 &[#(#listeners),*],
@@ -225,7 +237,14 @@ impl ToTokens for TemplateAttributeBuilder {
         match name {
             AttributeName::Ident(name) => tokens.append_all(quote! {
                 TemplateAttribute{
-                    attribute: dioxus_elements::#element_tag::#name,
+                    attribute:
+                    {
+                        mod __inner {
+                            use super::dioxus_elements::*;
+                            pub type  __el = #element_tag;
+                        }
+                        __inner::__el::#name
+                    },
                     value: #value,
                 }
             }),

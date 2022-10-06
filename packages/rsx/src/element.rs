@@ -180,7 +180,10 @@ impl ToTokens for Element {
 
         tokens.append_all(quote! {
             __cx.element(
-                dioxus_elements::#name,
+                {
+                    use dioxus_elements::*;
+                    #name
+                },
                 __cx.bump().alloc([ #(#listeners),* ]),
                 __cx.bump().alloc([ #(#attr),* ]),
                 __cx.bump().alloc([ #(#children),* ]),
@@ -244,12 +247,24 @@ impl ToTokens for ElementAttrNamed {
         tokens.append_all(match attr {
             ElementAttr::AttrText { name, value } => {
                 quote! {
-                    __cx.attr_disciption( dioxus_elements::#el_name::#name, #value)
+                    __cx.attr_disciption( {
+                        mod __inner {
+                            use super::dioxus_elements::*;
+                            pub type  __el = #el_name;
+                        }
+                        __inner::__el::#name
+                    }, #value)
                 }
             }
             ElementAttr::AttrExpression { name, value } => {
                 quote! {
-                    __cx.attr_disciption( dioxus_elements::#el_name::#name, #value)
+                    __cx.attr_disciption( {
+                        mod __inner {
+                            use super::dioxus_elements::*;
+                            pub type  __el = #el_name;
+                        }
+                        __inner::__el::#name
+                    }, #value)
                 }
             }
             ElementAttr::CustomAttrText { name, value } => {
