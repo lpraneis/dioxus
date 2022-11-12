@@ -34,6 +34,18 @@ impl<'a, T> std::ops::Deref for Scoped<'a, T> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct UpdateScope<'a> {
+    sender: copy_futures_channel::Sender<'a, SchedulerMsg>,
+    scope: ScopeId,
+}
+
+impl UpdateScope<'_> {
+    pub fn send(&mut self) {
+        self.sender.send(SchedulerMsg::Immediate(self.scope));
+    }
+}
+
 /// A component's unique identifier.
 ///
 /// `ScopeId` is a `usize` that is unique across the entire [`VirtualDom`] and across time. [`ScopeID`]s will never be reused
@@ -55,7 +67,7 @@ pub struct ScopeState {
     pub(crate) height: u32,
 
     pub(crate) hook_arena: Bump,
-    pub(crate) hook_vals: RefCell<Vec<*mut dyn Any>>,
+    pub(crate) hook_vals: RefCell<Vec<*mut ()>>,
     pub(crate) hook_idx: Cell<usize>,
 
     pub(crate) shared_contexts: RefCell<HashMap<TypeId, Box<dyn Any>>>,
@@ -154,6 +166,15 @@ impl ScopeState {
     pub fn schedule_update(&self) -> Arc<dyn Fn() + Send + Sync + 'static> {
         let (chan, id) = (self.tasks.sender.clone(), self.scope_id());
         Arc::new(move || drop(chan.unbounded_send(SchedulerMsg::Immediate(id))))
+    }
+
+    /// Create a subscription that schedules a future render for the reference component
+    ///
+    /// ## Notice: you should prefer using [`schedule_update_any`] and [`scope_id`]
+    pub fn schedule_update_non_sync(&self) -> UpdateScope {
+        let scope = self.scope_id();
+        let sender = self.tasks.copy_sender;
+        UpdateScope { sender, scope }
     }
 
     /// Schedule an update for any component given its [`ScopeId`].
@@ -368,22 +389,24 @@ impl ScopeState {
     /// }
     /// ```
     #[allow(clippy::mut_from_ref)]
-    pub fn use_hook<State: 'static>(&self, initializer: impl FnOnce() -> State) -> &mut State {
+    pub fn use_hook<'a, State: 'a>(&'a self, initializer: impl FnOnce() -> State) -> &mut State {
         let mut vals = self.hook_vals.borrow_mut();
 
         let hook_len = vals.len();
         let cur_idx = self.hook_idx.get();
 
         if cur_idx >= hook_len {
-            vals.push(self.hook_arena.alloc(initializer()));
+            let ptr: *mut _ = self.hook_arena.alloc(initializer());
+            vals.push(ptr as *mut ());
         }
 
         vals
             .get(cur_idx)
-            .and_then(|inn| {
+            .map(|inn| {
                 self.hook_idx.set(cur_idx + 1);
-                let raw_box = unsafe { &mut **inn };
-                raw_box.downcast_mut::<State>()
+                let ptr = (*inn) as *mut State;
+                let state: &mut State = unsafe { &mut *ptr };
+                state
             })
             .expect(
                 r###"

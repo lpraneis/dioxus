@@ -30,6 +30,8 @@ use std::{cell::RefCell, rc::Rc};
 pub(crate) struct Scheduler {
     pub sender: futures_channel::mpsc::UnboundedSender<SchedulerMsg>,
 
+    pub copy_sender: copy_futures_channel::Sender<'static, SchedulerMsg>,
+
     /// Tasks created with cx.spawn
     pub tasks: RefCell<Slab<Rc<LocalTask>>>,
 
@@ -38,9 +40,13 @@ pub(crate) struct Scheduler {
 }
 
 impl Scheduler {
-    pub fn new(sender: futures_channel::mpsc::UnboundedSender<SchedulerMsg>) -> Rc<Self> {
+    pub fn new(
+        sender: futures_channel::mpsc::UnboundedSender<SchedulerMsg>,
+        copy_sender: copy_futures_channel::Sender<'static, SchedulerMsg>,
+    ) -> Rc<Self> {
         Rc::new(Scheduler {
             sender,
+            copy_sender,
             tasks: RefCell::new(Slab::new()),
             leaves: RefCell::new(Slab::new()),
         })

@@ -93,6 +93,7 @@ pub use crate::innerlude::{
     TemplateAttribute,
     TemplateNode,
     UiEvent,
+    UpdateScope,
     VNode,
     VirtualDom,
 };

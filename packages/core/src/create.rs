@@ -221,9 +221,9 @@ impl VirtualDom {
                                 let mut boundary_mut = boundary.borrow_mut();
                                 let split_off = mutations.split_off(mutations_to_this_point);
 
-                                let split_off = unsafe { std::mem::transmute(split_off) };
+                                // let split_off = unsafe { std::mem::transmute(split_off) };
 
-                                boundary_mut.mutations.edits = split_off;
+                                // boundary_mut.mutations.edits = split_off;
                                 boundary_mut
                                     .waiting_on
                                     .extend(self.collected_leaves.drain(..));

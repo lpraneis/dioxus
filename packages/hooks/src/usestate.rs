@@ -1,10 +1,13 @@
 #![warn(clippy::pedantic)]
 
-use dioxus_core::prelude::*;
+use dioxus_core::{prelude::*, UpdateScope};
 use std::{
-    cell::{RefCell, RefMut},
+    cell::RefMut,
+    collections::VecDeque,
     fmt::{Debug, Display},
-    ops::{Add, Div, Mul, Not, Sub},
+    marker::PhantomData,
+    mem::ManuallyDrop,
+    ops::{Add, Deref, DerefMut, Div, Mul, Not, Sub},
     rc::Rc,
     sync::Arc,
 };
@@ -30,56 +33,45 @@ use std::{
 ///     ))
 /// }
 /// ```
-pub fn use_state<T: 'static>(
-    cx: &ScopeState,
+pub fn use_state<'a, T: 'static, Y>(
+    cx: Scope<'a, Y>,
     initial_state_fn: impl FnOnce() -> T,
-) -> &UseState<T> {
+) -> &mut UseState<'a, T> {
     let hook = cx.use_hook(move || {
-        let current_val = Rc::new(initial_state_fn());
-        let update_callback = cx.schedule_update();
-        let slot = Rc::new(RefCell::new(current_val.clone()));
-        let setter = Rc::new({
-            dioxus_core::to_owned![update_callback, slot];
-            move |new| {
-                {
-                    let mut slot = slot.borrow_mut();
+        struct DropHandler<'a, T: 'static>(UseState<'a, T>);
 
-                    // if there's only one reference (weak or otherwise), we can just swap the values
-                    // Typically happens when the state is set multiple times - we don't want to create a new Rc for each new value
-                    if let Some(val) = Rc::get_mut(&mut slot) {
-                        *val = new;
-                    } else {
-                        *slot = Rc::new(new);
-                    }
+        impl<T> Drop for DropHandler<'_, T> {
+            fn drop(&mut self) {
+                unsafe {
+                    ManuallyDrop::drop(&mut *self.0.value.0);
                 }
-                update_callback();
             }
-        });
-
-        UseState {
-            current_val,
-            update_callback,
-            setter,
-            slot,
         }
+
+        let current_val = initial_state_fn();
+        let update_scope = cx.schedule_update_non_sync();
+
+        let value = CopyCell::new(current_val);
+
+        DropHandler(UseState {
+            value,
+            update_scope,
+        })
     });
 
-    hook.current_val = hook.slot.borrow().clone();
-
-    hook
+    &mut hook.0
 }
 
-pub struct UseState<T: 'static> {
-    pub(crate) current_val: Rc<T>,
-    pub(crate) update_callback: Arc<dyn Fn()>,
-    pub(crate) setter: Rc<dyn Fn(T)>,
-    pub(crate) slot: Rc<RefCell<Rc<T>>>,
+pub struct UseState<'a, T: 'static> {
+    pub(crate) update_scope: UpdateScope<'a>,
+    pub(crate) value: CopyCell<'a, T>,
 }
 
-impl<T: 'static> UseState<T> {
+impl<T: 'static> UseState<'_, T> {
     /// Set the state to a new value.
     pub fn set(&self, new: T) {
-        (self.setter)(new);
+        *self.value.borrow_mut() = new;
+        self.needs_update();
     }
 
     /// Get the current value of the state by cloning its container Rc.
@@ -102,35 +94,8 @@ impl<T: 'static> UseState<T> {
     /// }
     /// ```
     #[must_use]
-    pub fn current(&self) -> Rc<T> {
-        self.slot.borrow().clone()
-    }
-
-    /// Get the `setter` function directly without the `UseState` wrapper.
-    ///
-    /// This is useful for passing the setter function to other components.
-    ///
-    /// However, for most cases, calling `to_owned` on the state is the
-    /// preferred way to get "another" state handle.
-    ///
-    ///
-    /// # Examples
-    /// A component might require an `Rc<dyn Fn(T)>` as an input to set a value.
-    ///
-    /// ```rust, ignore
-    /// fn component(cx: Scope) -> Element {
-    ///     let value = use_state(&cx, || 0);
-    ///
-    ///     rsx!{
-    ///         Component {
-    ///             handler: value.setter()
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    #[must_use]
-    pub fn setter(&self) -> Rc<dyn Fn(T)> {
-        self.setter.clone()
+    pub fn current(&self) -> RcCellBorrow<T> {
+        self.value.borrow()
     }
 
     /// Set the state to a new value, using the current state value as a reference.
@@ -162,45 +127,10 @@ impl<T: 'static> UseState<T> {
     /// ```
     pub fn modify(&self, f: impl FnOnce(&T) -> T) {
         let new_val = {
-            let current = self.slot.borrow();
-            f(current.as_ref())
+            let current = self.value.borrow();
+            f(&*current)
         };
-        (self.setter)(new_val);
-    }
-
-    /// Get the value of the state when this handle was created.
-    ///
-    /// This method is useful when you want an `Rc` around the data to cheaply
-    /// pass it around your app.
-    ///
-    /// ## Warning
-    ///
-    /// This will return a stale value if used within async contexts.
-    ///
-    /// Try `current` to get the real current value of the state.
-    ///
-    /// ## Example
-    ///
-    /// ```rust, ignore
-    /// # use dioxus_core::prelude::*;
-    /// # use dioxus_hooks::*;
-    /// fn component(cx: Scope) -> Element {
-    ///     let value = use_state(&cx, || 0);
-    ///
-    ///     let as_rc = value.get();
-    ///     assert_eq!(as_rc.as_ref(), &0);
-    ///
-    ///     # todo!()
-    /// }
-    /// ```
-    #[must_use]
-    pub fn get(&self) -> &T {
-        &self.current_val
-    }
-
-    #[must_use]
-    pub fn get_rc(&self) -> &Rc<T> {
-        &self.current_val
+        self.set(new_val);
     }
 
     /// Mark the component that create this [`UseState`] as dirty, forcing it to re-render.
@@ -218,11 +148,18 @@ impl<T: 'static> UseState<T> {
     /// }
     /// ```
     pub fn needs_update(&self) {
-        (self.update_callback)();
+        let mut sender = self.update_scope;
+        sender.send();
     }
-}
 
-impl<T: Clone> UseState<T> {
+    pub fn borrow(&self) -> RcCellBorrow<'_, T> {
+        self.value.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> RcCellBorrowMut<'_, T> {
+        self.value.borrow_mut()
+    }
+
     /// Get a mutable handle to the value by calling `ToOwned::to_owned` on the
     /// current value.
     ///
@@ -242,203 +179,149 @@ impl<T: Clone> UseState<T> {
     /// val.with_mut(|v| *v = 1);
     /// ```
     pub fn with_mut(&self, apply: impl FnOnce(&mut T)) {
-        let mut slot = self.slot.borrow_mut();
-        let mut inner = slot.as_ref().to_owned();
-
-        apply(&mut inner);
-
-        if let Some(new) = Rc::get_mut(&mut slot) {
-            *new = inner;
-        } else {
-            *slot = Rc::new(inner);
-        }
+        apply(&mut self.value.borrow_mut());
 
         self.needs_update();
-    }
-
-    /// Get a mutable handle to the value by calling `ToOwned::to_owned` on the
-    /// current value.
-    ///
-    /// This is essentially cloning the underlying value and then setting it,
-    /// giving you a mutable handle in the process. This method is intended for
-    /// types that are cheaply cloneable.
-    ///
-    /// # Warning
-    /// Be careful with `RefMut` since you might panic if the `RefCell` is left open!
-    ///
-    /// # Examples
-    ///
-    /// ```rust, ignore
-    /// let val = use_state(&cx, || 0);
-    ///
-    /// *val.make_mut() += 1;
-    /// ```
-    #[must_use]
-    pub fn make_mut(&self) -> RefMut<T> {
-        let mut slot = self.slot.borrow_mut();
-
-        self.needs_update();
-
-        if Rc::strong_count(&*slot) > 0 {
-            *slot = Rc::new(slot.as_ref().to_owned());
-        }
-
-        RefMut::map(slot, |rc| Rc::get_mut(rc).expect("the hard count to be 0"))
-    }
-
-    /// Convert this handle to a tuple of the value and the handle itself.
-    #[must_use]
-    pub fn split(&self) -> (&T, &Self) {
-        (&self.current_val, self)
     }
 }
 
-impl<T: 'static> Clone for UseState<T> {
+impl<T> Clone for UseState<'_, T> {
     fn clone(&self) -> Self {
-        UseState {
-            current_val: self.current_val.clone(),
-            update_callback: self.update_callback.clone(),
-            setter: self.setter.clone(),
-            slot: self.slot.clone(),
+        Self {
+            update_scope: self.update_scope,
+            value: self.value,
         }
     }
 }
+impl<T> Copy for UseState<'_, T> {}
 
-impl<T: 'static + Display> std::fmt::Display for UseState<T> {
+impl<T: 'static + Display> std::fmt::Display for UseState<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.current_val)
+        write!(f, "{}", &*self.value.borrow())
     }
 }
 
-impl<T: std::fmt::Binary> std::fmt::Binary for UseState<T> {
+impl<T: std::fmt::Binary> std::fmt::Binary for UseState<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:b}", self.current_val.as_ref())
+        write!(f, "{:b}", self.value.borrow().deref())
     }
 }
 
-impl<T: PartialEq> PartialEq<T> for UseState<T> {
+impl<T: PartialEq> PartialEq<T> for UseState<'_, T> {
     fn eq(&self, other: &T) -> bool {
-        self.current_val.as_ref() == other
+        *self.value.borrow().deref() == *other
     }
 }
 
 // todo: this but for more interesting conrete types
-impl PartialEq<bool> for &UseState<bool> {
+impl PartialEq<bool> for &UseState<'_, bool> {
     fn eq(&self, other: &bool) -> bool {
-        self.current_val.as_ref() == other
+        *self.value.borrow().deref() == *other
     }
 }
 
-impl<T: PartialEq> PartialEq<UseState<T>> for UseState<T> {
-    fn eq(&self, other: &UseState<T>) -> bool {
-        Rc::ptr_eq(&self.current_val, &other.current_val)
+impl<T: PartialEq> PartialEq<UseState<'_, T>> for UseState<'_, T> {
+    fn eq(&self, other: &UseState<'_, T>) -> bool {
+        *self.value.borrow() == *other.value.borrow()
     }
 }
 
-impl<T: Debug> Debug for UseState<T> {
+impl<T: Debug> Debug for UseState<'_, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.current_val)
+        write!(f, "{:?}", self.value.borrow().deref())
     }
 }
 
-impl<T> std::ops::Deref for UseState<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.current_val.as_ref()
-    }
-}
-
-impl<T: Not + Copy> std::ops::Not for &UseState<T> {
+impl<T: Not + Copy> std::ops::Not for &UseState<'_, T> {
     type Output = <T as std::ops::Not>::Output;
 
     fn not(self) -> Self::Output {
-        self.current_val.not()
+        self.value.borrow().deref().not()
     }
 }
 
-impl<T: Not + Copy> std::ops::Not for UseState<T> {
+impl<T: Not + Copy> std::ops::Not for UseState<'_, T> {
     type Output = <T as std::ops::Not>::Output;
 
     fn not(self) -> Self::Output {
-        self.current_val.not()
+        self.value.borrow().deref().not()
     }
 }
 
-impl<T: std::ops::Add + Copy> std::ops::Add<T> for &UseState<T> {
+impl<T: std::ops::Add + Copy> std::ops::Add<T> for &UseState<'_, T> {
     type Output = <T as std::ops::Add>::Output;
 
     fn add(self, other: T) -> Self::Output {
-        *self.current_val.as_ref() + other
+        *self.value.borrow().deref() + other
     }
 }
-impl<T: std::ops::Sub + Copy> std::ops::Sub<T> for &UseState<T> {
+impl<T: std::ops::Sub + Copy> std::ops::Sub<T> for &UseState<'_, T> {
     type Output = <T as std::ops::Sub>::Output;
 
     fn sub(self, other: T) -> Self::Output {
-        *self.current_val.as_ref() - other
+        *self.value.borrow().deref() - other
     }
 }
 
-impl<T: std::ops::Div + Copy> std::ops::Div<T> for &UseState<T> {
+impl<T: std::ops::Div + Copy> std::ops::Div<T> for &UseState<'_, T> {
     type Output = <T as std::ops::Div>::Output;
 
     fn div(self, other: T) -> Self::Output {
-        *self.current_val.as_ref() / other
+        *self.value.borrow().deref() / other
     }
 }
 
-impl<T: std::ops::Mul + Copy> std::ops::Mul<T> for &UseState<T> {
+impl<T: std::ops::Mul + Copy> std::ops::Mul<T> for &UseState<'_, T> {
     type Output = <T as std::ops::Mul>::Output;
 
     fn mul(self, other: T) -> Self::Output {
-        *self.current_val.as_ref() * other
+        *self.value.borrow().deref() * other
     }
 }
 
-impl<T: Add<Output = T> + Copy> std::ops::AddAssign<T> for &UseState<T> {
+impl<T: Add<Output = T> + Copy> std::ops::AddAssign<T> for &UseState<'_, T> {
     fn add_assign(&mut self, rhs: T) {
         self.set((*self.current()) + rhs);
     }
 }
 
-impl<T: Sub<Output = T> + Copy> std::ops::SubAssign<T> for &UseState<T> {
+impl<T: Sub<Output = T> + Copy> std::ops::SubAssign<T> for &UseState<'_, T> {
     fn sub_assign(&mut self, rhs: T) {
         self.set((*self.current()) - rhs);
     }
 }
 
-impl<T: Mul<Output = T> + Copy> std::ops::MulAssign<T> for &UseState<T> {
+impl<T: Mul<Output = T> + Copy> std::ops::MulAssign<T> for &UseState<'_, T> {
     fn mul_assign(&mut self, rhs: T) {
         self.set((*self.current()) * rhs);
     }
 }
 
-impl<T: Div<Output = T> + Copy> std::ops::DivAssign<T> for &UseState<T> {
+impl<T: Div<Output = T> + Copy> std::ops::DivAssign<T> for &UseState<'_, T> {
     fn div_assign(&mut self, rhs: T) {
         self.set((*self.current()) / rhs);
     }
 }
 
-impl<T: Add<Output = T> + Copy> std::ops::AddAssign<T> for UseState<T> {
+impl<T: Add<Output = T> + Copy> std::ops::AddAssign<T> for UseState<'_, T> {
     fn add_assign(&mut self, rhs: T) {
         self.set((*self.current()) + rhs);
     }
 }
 
-impl<T: Sub<Output = T> + Copy> std::ops::SubAssign<T> for UseState<T> {
+impl<T: Sub<Output = T> + Copy> std::ops::SubAssign<T> for UseState<'_, T> {
     fn sub_assign(&mut self, rhs: T) {
         self.set((*self.current()) - rhs);
     }
 }
 
-impl<T: Mul<Output = T> + Copy> std::ops::MulAssign<T> for UseState<T> {
+impl<T: Mul<Output = T> + Copy> std::ops::MulAssign<T> for UseState<'_, T> {
     fn mul_assign(&mut self, rhs: T) {
         self.set((*self.current()) * rhs);
     }
 }
 
-impl<T: Div<Output = T> + Copy> std::ops::DivAssign<T> for UseState<T> {
+impl<T: Div<Output = T> + Copy> std::ops::DivAssign<T> for UseState<'_, T> {
     fn div_assign(&mut self, rhs: T) {
         self.set((*self.current()) / rhs);
     }
@@ -447,33 +330,260 @@ impl<T: Div<Output = T> + Copy> std::ops::DivAssign<T> for UseState<T> {
 #[test]
 fn api_makes_sense() {
     #[allow(unused)]
+    fn callback_like<'a, T>(scope: Scope<'a, T>, _: impl FnOnce() + 'a) {}
+
+    #[allow(unused)]
     fn app(cx: Scope) -> Element {
-        let val = use_state(&cx, || 0);
+        let val = use_state(cx, || 0);
 
         val.set(0);
         val.modify(|v| v + 1);
-        let real_current = val.current();
 
-        match val.get() {
+        match *val.borrow() {
             10 => {
                 val.set(20);
                 val.modify(|v| v + 1);
             }
             20 => {}
             _ => {
-                println!("{real_current}");
+                println!("{val}");
             }
         }
 
-        cx.spawn({
-            dioxus_core::to_owned![val];
-            async move {
-                val.modify(|f| f + 1);
-            }
+        callback_like(cx, || {
+            val.set(0);
+            val.modify(|v| v + 1);
+        });
+        callback_like(cx, || {
+            val.borrow();
+        });
+        callback_like(cx, || {
+            val.borrow_mut();
         });
 
         // cx.render(LazyNodes::new(|f| f.static_text("asd")))
 
         todo!()
     }
+}
+
+#[derive(Debug)]
+struct RcCellInner<T> {
+    refrenced: bool,
+    data: T,
+}
+
+#[derive(Debug)]
+pub struct CopyCell<'a, T>(*mut ManuallyDrop<RcCellInner<T>>, PhantomData<&'a ()>);
+
+impl<'a, T> Clone for CopyCell<'a, T> {
+    fn clone(&self) -> Self {
+        Self(self.0, PhantomData)
+    }
+}
+impl<'a, T> Copy for CopyCell<'a, T> {}
+
+impl<'a, T> CopyCell<'a, T> {
+    fn new(data: T) -> Self {
+        Self(
+            &mut *Box::new(ManuallyDrop::new(RcCellInner {
+                refrenced: false,
+                data,
+            })),
+            PhantomData,
+        )
+    }
+
+    fn borrow(&self) -> RcCellBorrow<'_, T> {
+        unsafe {
+            if (*self.0).refrenced {
+                panic!("already borrowed");
+            }
+            (*self.0).refrenced = true;
+        }
+        RcCellBorrow(self.0, PhantomData)
+    }
+
+    fn borrow_mut(&self) -> RcCellBorrowMut<'_, T> {
+        unsafe {
+            if (*self.0).refrenced {
+                panic!("already borrowed");
+            }
+            (*self.0).refrenced = true;
+        }
+        RcCellBorrowMut(self.0, PhantomData)
+    }
+}
+
+pub struct RcCellBorrow<'a, T>(*mut ManuallyDrop<RcCellInner<T>>, PhantomData<&'a ()>);
+
+impl<'a, T> Drop for RcCellBorrow<'a, T> {
+    fn drop(&mut self) {
+        unsafe {
+            (*self.0).refrenced = false;
+        }
+    }
+}
+
+impl<'a, T> Deref for RcCellBorrow<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe { &(*self.0).data }
+    }
+}
+
+pub struct RcCellBorrowMut<'a, T>(*mut ManuallyDrop<RcCellInner<T>>, PhantomData<&'a ()>);
+
+impl<'a, T> Drop for RcCellBorrowMut<'a, T> {
+    fn drop(&mut self) {
+        unsafe {
+            (*self.0).refrenced = false;
+        }
+    }
+}
+
+impl<'a, T> Deref for RcCellBorrowMut<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe { &(*self.0).data }
+    }
+}
+
+impl<'a, T> DerefMut for RcCellBorrowMut<'a, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut (*self.0).data }
+    }
+}
+
+// // this should fail
+// #[test]
+// fn rc_cell_test_fail() {
+//     fn create_with_lifetime<'a>(_: &'a ()) -> CopyCell<'a, i32> {
+//         CopyCell::new(0)
+//     }
+//     fn in_lifetime<'a, 'b>(marker: &'a ()) -> CopyCell<'b, i32> {
+//         create_with_lifetime(marker)
+//     }
+//     let _ = in_lifetime(&());
+// }
+
+#[test]
+fn rc_cell_test() {
+    let r = CopyCell::new(0);
+    let x = r;
+    let f = || {
+        println!("{:?}", &*x.borrow());
+    };
+    let f2 = || {
+        let mut_ref: &mut i32 = &mut x.borrow_mut();
+        *mut_ref += 1;
+        println!("{:?}", mut_ref);
+    };
+    println!("{:?}", { &mut *x.borrow_mut() });
+    f2();
+    f();
+    println!("{:?}, {:?}", r, x);
+    unsafe { r.0.drop_in_place() }
+}
+
+#[test]
+fn sizes() {
+    dbg!(std::mem::size_of::<CopyCell<'_, i32>>());
+    dbg!(std::mem::size_of::<UseState<i32>>());
+}
+
+#[derive(Debug)]
+struct Messages<T> {
+    messages: VecDeque<T>,
+}
+
+impl<T> Default for Messages<T> {
+    fn default() -> Self {
+        Self {
+            messages: VecDeque::new(),
+        }
+    }
+}
+
+impl<T> Messages<T> {
+    fn push(&self, message: T) {
+        unsafe {
+            let raw: *const _ = &self.messages;
+            let raw_mut = raw as *mut Messages<T>;
+            (*raw_mut).messages.push_back(message);
+        }
+    }
+
+    fn pop(&self) -> Option<T> {
+        unsafe {
+            let raw: *const _ = &self.messages;
+            let raw_mut = raw as *mut Messages<T>;
+            (*raw_mut).messages.pop_front()
+        }
+    }
+}
+
+pub struct Receiver<T> {
+    messages: Box<Messages<T>>,
+}
+
+impl<T> Default for Receiver<T> {
+    fn default() -> Receiver<T> {
+        Receiver {
+            messages: Box::new(Messages::default()),
+        }
+    }
+}
+
+impl<T: Debug> Receiver<T> {
+    pub fn receive(&self) -> Option<T> {
+        self.messages.pop()
+    }
+
+    pub fn sender(&self) -> Sender<T> {
+        let raw: *const _ = &*self.messages;
+        let raw_mut = raw as *mut Messages<T>;
+        Sender {
+            messages: raw_mut,
+            l: PhantomData,
+        }
+    }
+}
+
+pub struct Sender<'a, T> {
+    messages: *mut Messages<T>,
+    l: PhantomData<&'a ()>,
+}
+
+impl<'a, T> Clone for Sender<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            messages: self.messages,
+            l: self.l,
+        }
+    }
+}
+impl<'a, T> Copy for Sender<'a, T> {}
+
+impl<'a, T: Debug> Sender<'a, T> {
+    pub fn send(&mut self, message: T) {
+        unsafe {
+            (*self.messages).push(message);
+        }
+    }
+}
+
+#[test]
+fn test() {
+    let r = Receiver::default();
+    let mut s = r.sender();
+    for i in 0..100 {
+        s.send(i);
+    }
+    for i in 0..100 {
+        assert_eq!(r.receive(), Some(i));
+    }
+    assert_eq!(r.receive(), None);
 }
