@@ -81,6 +81,7 @@ pub use crate::innerlude::{
     Mutation,
     Mutations,
     NodeFactory,
+    OwnedUpdateScope,
     Properties,
     Scope,
     ScopeId,

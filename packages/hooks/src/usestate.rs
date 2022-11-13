@@ -1,6 +1,6 @@
 #![warn(clippy::pedantic)]
 
-use dioxus_core::{prelude::*, UpdateScope};
+use dioxus_core::{prelude::*, to_owned, OwnedUpdateScope, UpdateScope};
 use std::{
     cell::{Ref, RefCell, RefMut},
     collections::VecDeque,
@@ -10,6 +10,22 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
+
+pub trait Sendable {
+    fn send(&self);
+}
+
+impl Sendable for UpdateScope<'_> {
+    fn send(&self) {
+        self.send();
+    }
+}
+
+impl Sendable for OwnedUpdateScope {
+    fn send(&self) {
+        self.send();
+    }
+}
 
 /// Store state between component renders.
 ///
@@ -35,7 +51,7 @@ use std::{
 pub fn use_state<'a, T: 'static, Y>(
     cx: Scope<'a, Y>,
     initial_state_fn: impl FnOnce() -> T,
-) -> UseState<'a, T, BorrowedRcCell<'a, T>> {
+) -> UseState<T, BorrowedRcCell<'a, T>, UpdateScope> {
     let hook = cx.use_hook(move || {
         let current_val = initial_state_fn();
         let update_scope = cx.schedule_update_non_sync();
@@ -56,13 +72,13 @@ pub fn use_state<'a, T: 'static, Y>(
     }
 }
 
-pub struct UseState<'a, T, Storage: AsRef<RcCell<T>>> {
-    pub(crate) update_scope: UpdateScope<'a>,
+pub struct UseState<T, Storage: AsRef<RcCell<T>>, SenderStorage: Sendable> {
+    pub(crate) update_scope: SenderStorage,
     pub(crate) value: Storage,
     phantom: PhantomData<T>,
 }
 
-impl<T, Storage: AsRef<RcCell<T>>> UseState<'_, T, Storage> {
+impl<T, Storage: AsRef<RcCell<T>>, SenderStorage: Sendable> UseState<T, Storage, SenderStorage> {
     #[inline(always)]
     fn value(&self) -> &RcCell<T> {
         self.value.as_ref()
@@ -94,7 +110,7 @@ impl<T, Storage: AsRef<RcCell<T>>> UseState<'_, T, Storage> {
     /// }
     /// ```
     #[must_use]
-    pub fn current(&self) -> Ref<'_, T> {
+    pub fn current(&self) -> Ref<T> {
         self.value().borrow()
     }
 
@@ -148,15 +164,14 @@ impl<T, Storage: AsRef<RcCell<T>>> UseState<'_, T, Storage> {
     /// }
     /// ```
     pub fn needs_update(&self) {
-        let mut sender = self.update_scope;
-        sender.send();
+        self.update_scope.send();
     }
 
-    pub fn borrow(&self) -> Ref<'_, T> {
+    pub fn borrow(&self) -> Ref<T> {
         self.current()
     }
 
-    pub fn borrow_mut(&self) -> RefMut<'_, T> {
+    pub fn borrow_mut(&self) -> RefMut<T> {
         self.value().borrow_mut()
     }
 
@@ -185,50 +200,80 @@ impl<T, Storage: AsRef<RcCell<T>>> UseState<'_, T, Storage> {
     }
 }
 
-impl<T, Storage: AsRef<RcCell<T>> + Clone> Clone for UseState<'_, T, Storage> {
+impl<'a, T> UseState<T, BorrowedRcCell<'a, T>, UpdateScope<'a>> {
+    fn to_owned(&self) -> UseState<T, RcCell<T>, OwnedUpdateScope> {
+        UseState {
+            value: self.value.to_owned(),
+            update_scope: self.update_scope.to_owned(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T, SenderStorage: Sendable + Clone, Storage: AsRef<RcCell<T>> + Clone> Clone
+    for UseState<T, Storage, SenderStorage>
+{
     fn clone(&self) -> Self {
         Self {
-            update_scope: self.update_scope,
+            update_scope: self.update_scope.clone(),
             value: self.value.clone(),
             phantom: PhantomData,
         }
     }
 }
-impl<T, Storage: AsRef<RcCell<T>> + Copy> Copy for UseState<'_, T, Storage> {}
+impl<T, SenderStorage: Sendable + Copy, Storage: AsRef<RcCell<T>> + Copy> Copy
+    for UseState<T, Storage, SenderStorage>
+{
+}
 
-impl<T: Display, Storage: AsRef<RcCell<T>>> std::fmt::Display for UseState<'_, T, Storage> {
+impl<T: Display, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::fmt::Display
+    for UseState<T, Storage, SenderStorage>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", &*self.value().borrow())
     }
 }
 
-impl<T: std::fmt::Binary, Storage: AsRef<RcCell<T>>> std::fmt::Binary for UseState<'_, T, Storage> {
+impl<T: std::fmt::Binary, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::fmt::Binary
+    for UseState<T, Storage, SenderStorage>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:b}", self.value().borrow().deref())
     }
 }
 
-impl<T: PartialEq, Storage: AsRef<RcCell<T>>> PartialEq<T> for UseState<'_, T, Storage> {
+impl<T: PartialEq, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> PartialEq<T>
+    for UseState<T, Storage, SenderStorage>
+{
     fn eq(&self, other: &T) -> bool {
         *self.value().borrow().deref() == *other
     }
 }
 
-impl<T: PartialEq, Storage1: AsRef<RcCell<T>>, Storage2: AsRef<RcCell<T>>>
-    PartialEq<UseState<'_, T, Storage2>> for UseState<'_, T, Storage1>
+impl<
+        T: PartialEq,
+        Storage1: AsRef<RcCell<T>>,
+        Storage2: AsRef<RcCell<T>>,
+        SenderStorage1: Sendable,
+        SenderStorage2: Sendable,
+    > PartialEq<UseState<T, Storage2, SenderStorage2>> for UseState<T, Storage1, SenderStorage1>
 {
-    fn eq(&self, other: &UseState<'_, T, Storage2>) -> bool {
+    fn eq(&self, other: &UseState<T, Storage2, SenderStorage2>) -> bool {
         *self.value().borrow() == *other.value().borrow()
     }
 }
 
-impl<T: Debug, Storage: AsRef<RcCell<T>>> Debug for UseState<'_, T, Storage> {
+impl<T: Debug, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> Debug
+    for UseState<T, Storage, SenderStorage>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.value().borrow().deref())
     }
 }
 
-impl<T: Not + Copy, Storage: AsRef<RcCell<T>>> std::ops::Not for &UseState<'_, T, Storage> {
+impl<T: Not + Copy, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::Not
+    for &UseState<T, Storage, SenderStorage>
+{
     type Output = <T as std::ops::Not>::Output;
 
     fn not(self) -> Self::Output {
@@ -236,7 +281,9 @@ impl<T: Not + Copy, Storage: AsRef<RcCell<T>>> std::ops::Not for &UseState<'_, T
     }
 }
 
-impl<T: Not + Copy, Storage: AsRef<RcCell<T>>> std::ops::Not for UseState<'_, T, Storage> {
+impl<T: Not + Copy, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::Not
+    for UseState<T, Storage, SenderStorage>
+{
     type Output = <T as std::ops::Not>::Output;
 
     fn not(self) -> Self::Output {
@@ -244,8 +291,8 @@ impl<T: Not + Copy, Storage: AsRef<RcCell<T>>> std::ops::Not for UseState<'_, T,
     }
 }
 
-impl<T: std::ops::Add + Copy, Storage: AsRef<RcCell<T>>> std::ops::Add<T>
-    for &UseState<'_, T, Storage>
+impl<T: std::ops::Add + Copy, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::Add<T>
+    for &UseState<T, Storage, SenderStorage>
 {
     type Output = <T as std::ops::Add>::Output;
 
@@ -253,8 +300,8 @@ impl<T: std::ops::Add + Copy, Storage: AsRef<RcCell<T>>> std::ops::Add<T>
         *self.value().borrow().deref() + other
     }
 }
-impl<T: std::ops::Sub + Copy, Storage: AsRef<RcCell<T>>> std::ops::Sub<T>
-    for &UseState<'_, T, Storage>
+impl<T: std::ops::Sub + Copy, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::Sub<T>
+    for &UseState<T, Storage, SenderStorage>
 {
     type Output = <T as std::ops::Sub>::Output;
 
@@ -263,8 +310,8 @@ impl<T: std::ops::Sub + Copy, Storage: AsRef<RcCell<T>>> std::ops::Sub<T>
     }
 }
 
-impl<T: std::ops::Div + Copy, Storage: AsRef<RcCell<T>>> std::ops::Div<T>
-    for &UseState<'_, T, Storage>
+impl<T: std::ops::Div + Copy, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::Div<T>
+    for &UseState<T, Storage, SenderStorage>
 {
     type Output = <T as std::ops::Div>::Output;
 
@@ -273,8 +320,8 @@ impl<T: std::ops::Div + Copy, Storage: AsRef<RcCell<T>>> std::ops::Div<T>
     }
 }
 
-impl<T: std::ops::Mul + Copy, Storage: AsRef<RcCell<T>>> std::ops::Mul<T>
-    for &UseState<'_, T, Storage>
+impl<T: std::ops::Mul + Copy, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::Mul<T>
+    for &UseState<T, Storage, SenderStorage>
 {
     type Output = <T as std::ops::Mul>::Output;
 
@@ -283,49 +330,65 @@ impl<T: std::ops::Mul + Copy, Storage: AsRef<RcCell<T>>> std::ops::Mul<T>
     }
 }
 
-impl<T: AddAssign, Storage: AsRef<RcCell<T>>> std::ops::AddAssign<T> for &UseState<'_, T, Storage> {
+impl<T: AddAssign, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::AddAssign<T>
+    for &UseState<T, Storage, SenderStorage>
+{
     fn add_assign(&mut self, rhs: T) {
         *self.value().borrow_mut() += rhs;
     }
 }
 
-impl<T: SubAssign, Storage: AsRef<RcCell<T>>> std::ops::SubAssign<T> for &UseState<'_, T, Storage> {
+impl<T: SubAssign, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::SubAssign<T>
+    for &UseState<T, Storage, SenderStorage>
+{
     fn sub_assign(&mut self, rhs: T) {
         *self.value().borrow_mut() -= rhs;
     }
 }
 
-impl<T: MulAssign, Storage: AsRef<RcCell<T>>> std::ops::MulAssign<T> for &UseState<'_, T, Storage> {
+impl<T: MulAssign, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::MulAssign<T>
+    for &UseState<T, Storage, SenderStorage>
+{
     fn mul_assign(&mut self, rhs: T) {
         *self.value().borrow_mut() *= rhs;
     }
 }
 
-impl<T: DivAssign, Storage: AsRef<RcCell<T>>> std::ops::DivAssign<T> for &UseState<'_, T, Storage> {
+impl<T: DivAssign, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::DivAssign<T>
+    for &UseState<T, Storage, SenderStorage>
+{
     fn div_assign(&mut self, rhs: T) {
         *self.value().borrow_mut() /= rhs;
     }
 }
 
-impl<T: AddAssign, Storage: AsRef<RcCell<T>>> std::ops::AddAssign<T> for UseState<'_, T, Storage> {
+impl<T: AddAssign, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::AddAssign<T>
+    for UseState<T, Storage, SenderStorage>
+{
     fn add_assign(&mut self, rhs: T) {
         *self.value().borrow_mut() += rhs;
     }
 }
 
-impl<T: SubAssign, Storage: AsRef<RcCell<T>>> std::ops::SubAssign<T> for UseState<'_, T, Storage> {
+impl<T: SubAssign, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::SubAssign<T>
+    for UseState<T, Storage, SenderStorage>
+{
     fn sub_assign(&mut self, rhs: T) {
         *self.value().borrow_mut() -= rhs;
     }
 }
 
-impl<T: MulAssign, Storage: AsRef<RcCell<T>>> std::ops::MulAssign<T> for UseState<'_, T, Storage> {
+impl<T: MulAssign, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::MulAssign<T>
+    for UseState<T, Storage, SenderStorage>
+{
     fn mul_assign(&mut self, rhs: T) {
         *self.value().borrow_mut() *= rhs;
     }
 }
 
-impl<T: DivAssign, Storage: AsRef<RcCell<T>>> std::ops::DivAssign<T> for UseState<'_, T, Storage> {
+impl<T: DivAssign, SenderStorage: Sendable, Storage: AsRef<RcCell<T>>> std::ops::DivAssign<T>
+    for UseState<T, Storage, SenderStorage>
+{
     fn div_assign(&mut self, rhs: T) {
         *self.value().borrow_mut() /= rhs;
     }
@@ -366,6 +429,13 @@ fn api_makes_sense() {
             val.borrow_mut();
         });
 
+        cx.spawn({
+            to_owned![val];
+            async {
+                val;
+            }
+        });
+
         // cx.render(LazyNodes::new(|f| f.static_text("asd")))
 
         todo!()
@@ -385,18 +455,6 @@ impl<'a, T> Clone for BorrowedRcCell<'a, T> {
 impl<'a, T> Copy for BorrowedRcCell<'a, T> {}
 
 impl<'a, T> BorrowedRcCell<'a, T> {
-    fn new(inner: &'a RcCell<T>) -> Self {
-        Self { inner: inner }
-    }
-
-    fn borrow(&self) -> Ref<'_, T> {
-        self.inner.borrow()
-    }
-
-    fn borrow_mut(&self) -> RefMut<'_, T> {
-        self.inner.borrow_mut()
-    }
-
     fn to_owned(&self) -> RcCell<T> {
         self.inner.clone()
     }
@@ -433,19 +491,23 @@ impl<T> RcCell<T> {
         }
     }
 
-    fn borrow(&self) -> Ref<'_, T> {
+    fn borrow(&self) -> Ref<T> {
         self.inner.borrow()
     }
 
-    fn borrow_mut(&self) -> RefMut<'_, T> {
+    fn borrow_mut(&self) -> RefMut<T> {
         self.inner.borrow_mut()
     }
 }
 
 #[test]
 fn sizes() {
-    dbg!(std::mem::size_of::<UseState<i32, BorrowedRcCell<'_, i32>>>());
-    dbg!(std::mem::size_of::<UseState<i32, RcCell<i32>>>());
+    dbg!(std::mem::size_of::<
+        UseState<u8, BorrowedRcCell<u8>, UpdateScope>,
+    >());
+    dbg!(std::mem::size_of::<
+        UseState<u8, RcCell<u8>, OwnedUpdateScope>,
+    >());
 }
 
 #[derive(Debug)]

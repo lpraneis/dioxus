@@ -7,6 +7,7 @@ use std::{
 };
 
 use bumpalo::Bump;
+use futures_channel::mpsc::UnboundedSender;
 use std::future::Future;
 
 use crate::{
@@ -34,15 +35,38 @@ impl<'a, T> std::ops::Deref for Scoped<'a, T> {
     }
 }
 
+#[derive(Clone)]
+pub struct OwnedUpdateScope {
+    sender: UnboundedSender<SchedulerMsg>,
+    scope: ScopeId,
+}
+
+impl OwnedUpdateScope {
+    pub fn send(&mut self) {
+        let _ = self
+            .sender
+            .unbounded_send(SchedulerMsg::Immediate(self.scope));
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct UpdateScope<'a> {
-    sender: crate::innerlude::Sender<'a, SchedulerMsg>,
+    sender: &'a UnboundedSender<SchedulerMsg>,
     scope: ScopeId,
 }
 
 impl UpdateScope<'_> {
     pub fn send(&mut self) {
-        self.sender.send(SchedulerMsg::Immediate(self.scope));
+        let _ = self
+            .sender
+            .unbounded_send(SchedulerMsg::Immediate(self.scope));
+    }
+
+    pub fn to_owned(&self) -> OwnedUpdateScope {
+        OwnedUpdateScope {
+            sender: self.sender.clone(),
+            scope: self.scope,
+        }
     }
 }
 
@@ -173,7 +197,7 @@ impl ScopeState {
     /// ## Notice: you should prefer using [`schedule_update_any`] and [`scope_id`]
     pub fn schedule_update_non_sync(&self) -> UpdateScope {
         let scope = self.scope_id();
-        let sender = self.tasks.copy_sender;
+        let sender = &self.tasks.sender;
         UpdateScope { sender, scope }
     }
 
