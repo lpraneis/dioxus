@@ -36,7 +36,7 @@ impl<'a, T> std::ops::Deref for Scoped<'a, T> {
 
 #[derive(Clone, Copy)]
 pub struct UpdateScope<'a> {
-    sender: copy_futures_channel::Sender<'a, SchedulerMsg>,
+    sender: crate::innerlude::Sender<'a, SchedulerMsg>,
     scope: ScopeId,
 }
 

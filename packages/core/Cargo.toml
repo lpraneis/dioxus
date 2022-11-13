@@ -34,8 +34,6 @@ indexmap = "1.7"
 # Serialize the Edits for use in Webview/Liveview instances
 serde = { version = "1", features = ["derive"], optional = true }
 
-copy_futures_channel = { path="d:/users/desktop/github/copy_futures_channel" }
-
 [dev-dependencies]
 tokio = { version = "*", features = ["full"] }
 

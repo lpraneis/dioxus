@@ -5,7 +5,7 @@ use crate::mutations::Mutation::*;
 use crate::nodes::VNode;
 use crate::nodes::{DynamicNode, TemplateNode};
 use crate::virtual_dom::VirtualDom;
-use crate::{AttributeValue, ElementId, ScopeId, TemplateAttribute};
+use crate::{AttributeValue, ScopeId, TemplateAttribute};
 
 impl VirtualDom {
     pub(crate) fn create_scope<'a>(

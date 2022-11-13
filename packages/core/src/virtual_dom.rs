@@ -157,7 +157,7 @@ pub struct VirtualDom {
     pub(crate) finished_fibers: Vec<ScopeId>,
 
     pub(crate) rx: futures_channel::mpsc::UnboundedReceiver<SchedulerMsg>,
-    pub(crate) non_sync_receiver: copy_futures_channel::Receiver<SchedulerMsg>,
+    pub(crate) non_sync_receiver: crate::innerlude::Receiver<SchedulerMsg>,
 }
 
 impl VirtualDom {
@@ -220,8 +220,8 @@ impl VirtualDom {
         P: 'static,
     {
         let (tx, rx) = futures_channel::mpsc::unbounded();
-        let non_sync_receiver = copy_futures_channel::Receiver::default();
-        let sender: copy_futures_channel::Sender<'static, SchedulerMsg> =
+        let non_sync_receiver = crate::innerlude::Receiver::default();
+        let sender: crate::innerlude::Sender<'static, SchedulerMsg> =
             unsafe { std::mem::transmute(non_sync_receiver.sender()) };
         let mut dom = Self {
             rx,
