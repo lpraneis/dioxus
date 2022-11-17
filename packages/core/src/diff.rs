@@ -1,24 +1,10 @@
-use std::any::Any;
-
 use crate::factory::RenderReturn;
-use crate::innerlude::Mutations;
+use crate::innerlude::{MutationStore, MutationStoreBuilder, Mutations};
 use crate::virtual_dom::VirtualDom;
-use crate::{Attribute, AttributeValue, TemplateNode};
+use crate::AttributeValue;
 
-use crate::any_props::VComponentProps;
-
-use crate::mutations::Mutation;
-use crate::nodes::{DynamicNode, Template, TemplateId};
-use crate::scopes::Scope;
-use crate::{
-    any_props::AnyProps,
-    arena::ElementId,
-    bump_frame::BumpFrame,
-    nodes::VNode,
-    scopes::{ScopeId, ScopeState},
-};
-use fxhash::{FxHashMap, FxHashSet};
-use slab::Slab;
+use crate::nodes::DynamicNode;
+use crate::{bump_frame::BumpFrame, nodes::VNode, scopes::ScopeId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DirtyScope {
@@ -38,8 +24,12 @@ impl Ord for DirtyScope {
     }
 }
 
-impl<'b> VirtualDom {
-    pub fn diff_scope(&mut self, mutations: &mut Mutations<'b>, scope: ScopeId) {
+impl<'b, B: MutationStoreBuilder> VirtualDom<B> {
+    pub fn diff_scope(
+        &mut self,
+        mutations: &mut Mutations<'b, B::MutationStore<'b>>,
+        scope: ScopeId,
+    ) {
         let scope_state = &mut self.scopes[scope.0];
 
         let cur_arena = scope_state.current_frame();
@@ -70,7 +60,7 @@ impl<'b> VirtualDom {
 
     fn diff_maybe_node(
         &mut self,
-        m: &mut Mutations<'b>,
+        m: &mut Mutations<'b, B::MutationStore<'b>>,
         left: &'b RenderReturn<'b>,
         right: &'b RenderReturn<'b>,
     ) {
@@ -83,7 +73,7 @@ impl<'b> VirtualDom {
             (Sync(Some(l)), Sync(None)) | (Sync(Some(l)), Async(_)) => {
                 //
                 let id = self.next_element(l); // todo!
-                m.push(Mutation::CreatePlaceholder { id });
+                m.create_placeholder(id);
                 self.drop_template(m, l, true);
             }
 
@@ -101,7 +91,7 @@ impl<'b> VirtualDom {
 
     pub fn diff_node(
         &mut self,
-        muts: &mut Mutations<'b>,
+        muts: &mut Mutations<'b, B::MutationStore<'b>>,
         left_template: &'b VNode<'b>,
         right_template: &'b VNode<'b>,
     ) {
@@ -126,12 +116,12 @@ impl<'b> VirtualDom {
 
             if left_attr.value != right_attr.value {
                 let value = "todo!()";
-                muts.push(Mutation::SetAttribute {
-                    id: left_attr.mounted_element.get(),
-                    name: left_attr.name,
+                muts.set_attribute(
+                    right_attr.name,
+                    right_attr.namespace,
                     value,
-                    ns: right_attr.namespace,
-                });
+                    right_attr.mounted_element.get(),
+                );
             }
         }
 
@@ -181,16 +171,13 @@ impl<'b> VirtualDom {
                 (DynamicNode::Text { id: lid, value: lvalue, .. }, DynamicNode::Text { id: rid, value: rvalue, .. }) => {
                     rid.set(lid.get());
                     if lvalue != rvalue {
-                        muts.push(Mutation::SetText {
-                            id: lid.get(),
-                            value: rvalue,
-                        });
+                        muts.set_text(rvalue, lid.get());
                     }
                 },
 
                 (DynamicNode::Text { id: lid, .. }, right) => {
                     let m = self.create_dynamic_node(muts, right_template, right, idx);
-                    muts.push(Mutation::ReplaceWith { id: lid.get(), m });
+                    muts.replace(lid.get(), m);
                 }
 
                 (DynamicNode::Placeholder(_), DynamicNode::Placeholder(_)) => todo!(),
@@ -247,7 +234,7 @@ impl<'b> VirtualDom {
     // the change list stack is in the same state when this function returns.
     fn diff_non_keyed_children(
         &mut self,
-        muts: &mut Mutations<'b>,
+        muts: &mut Mutations<'b, B::MutationStore<'b>>,
         old: &'b [VNode<'b>],
         new: &'b [VNode<'b>],
     ) {
@@ -287,7 +274,7 @@ impl<'b> VirtualDom {
     // The stack is empty upon entry.
     fn diff_keyed_children(
         &mut self,
-        muts: &mut Mutations<'b>,
+        muts: &mut Mutations<'b, B::MutationStore<'b>>,
         old: &'b [VNode<'b>],
         new: &'b [VNode<'b>],
     ) {
@@ -603,7 +590,11 @@ impl<'b> VirtualDom {
 
     /// Remove these nodes from the dom
     /// Wont generate mutations for the inner nodes
-    fn remove_nodes(&mut self, muts: &mut Mutations<'b>, nodes: &'b [VNode<'b>]) {
+    fn remove_nodes(
+        &mut self,
+        muts: &mut Mutations<'b, B::MutationStore<'b>>,
+        nodes: &'b [VNode<'b>],
+    ) {
         //
     }
 }

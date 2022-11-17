@@ -1,19 +1,21 @@
 use std::ops::Bound;
 
 use crate::factory::RenderReturn;
-use crate::innerlude::{Mutations, SuspenseContext, SuspenseId};
-use crate::mutations::Mutation;
+use crate::innerlude::{
+    MutationStore, MutationStoreBuilder, Mutations, SuspenseContext, SuspenseId,
+};
 use crate::mutations::Mutation::*;
+use crate::mutations::{self, Mutation};
 use crate::nodes::VNode;
 use crate::nodes::{DynamicNode, TemplateNode};
 use crate::virtual_dom::VirtualDom;
 use crate::{AttributeValue, ScopeId, TemplateAttribute};
 
-impl VirtualDom {
+impl<B: MutationStoreBuilder> VirtualDom<B> {
     pub(crate) fn create_scope<'a>(
         &mut self,
         scope: ScopeId,
-        mutations: &mut Mutations<'a>,
+        mutations: &mut Mutations<'a, B::MutationStore<'a>>,
         template: &'a VNode<'a>,
     ) -> usize {
         self.scope_stack.push(scope);
@@ -25,7 +27,7 @@ impl VirtualDom {
     /// Create this template and write its mutations
     pub(crate) fn create<'a>(
         &mut self,
-        mutations: &mut Mutations<'a>,
+        mutations: &mut Mutations<'a, B::MutationStore<'a>>,
         template: &'a VNode<'a>,
     ) -> usize {
         // The best renderers will have templates prehydrated and registered
@@ -36,10 +38,9 @@ impl VirtualDom {
                 self.create_static_node(mutations, template, node);
             }
 
-            mutations.template_mutations.push(SaveTemplate {
-                name: template.template.id,
-                m: template.template.roots.len(),
-            });
+            mutations
+                .template_mutations
+                .save_template(template.template.id, template.template.roots.len());
 
             self.templates
                 .insert(template.template.id, template.template.clone());
@@ -56,10 +57,7 @@ impl VirtualDom {
         for (root_idx, root) in template.template.roots.iter().enumerate() {
             on_stack += match root {
                 TemplateNode::Element { .. } | TemplateNode::Text(_) => {
-                    mutations.push(LoadTemplate {
-                        name: template.template.id,
-                        index: root_idx,
-                    });
+                    mutations.load_template(template.template.id, root_idx);
                     1
                 }
 
@@ -77,13 +75,13 @@ impl VirtualDom {
                         } => {
                             let id = self.next_element(template);
                             slot.set(id);
-                            mutations.push(CreateTextNode { value, id });
+                            mutations.create_text(id, value);
                             1
                         }
                         DynamicNode::Placeholder(slot) => {
                             let id = self.next_element(template);
                             slot.set(id);
-                            mutations.push(CreatePlaceholder { id });
+                            mutations.create_placeholder(id);
                             1
                         }
                     }
@@ -96,32 +94,25 @@ impl VirtualDom {
                 dynamic_attrs.next_if(|(_, p)| p[0] == root_idx as u8)
             {
                 let id = self.next_element(template);
-                mutations.push(AssignId {
-                    path: &path[1..],
-                    id,
-                });
+                mutations.assign_id(&path[1..], id);
 
                 loop {
                     let attribute = template.dynamic_attrs.get(attr_id).unwrap();
                     attribute.mounted_element.set(id);
 
                     match &attribute.value {
-                        AttributeValue::Text(value) => mutations.push(SetAttribute {
-                            name: attribute.name,
-                            value: *value,
-                            ns: attribute.namespace,
+                        AttributeValue::Text(value) => {
+                            mutations.set_attribute(attribute.name, attribute.namespace, *value, id)
+                        }
+                        AttributeValue::Bool(value) => mutations.set_bool_attribute(
+                            attribute.name,
+                            attribute.namespace,
+                            *value,
                             id,
-                        }),
-                        AttributeValue::Bool(value) => mutations.push(SetBoolAttribute {
-                            name: attribute.name,
-                            value: *value,
-                            id,
-                        }),
-                        AttributeValue::Listener(_) => mutations.push(NewEventListener {
-                            event_name: attribute.name,
-                            scope: cur_scope,
-                            id,
-                        }),
+                        ),
+                        AttributeValue::Listener(_) => {
+                            mutations.new_event_listener(attribute.name, cur_scope, id)
+                        }
                         AttributeValue::Float(_) => todo!(),
                         AttributeValue::Int(_) => todo!(),
                         AttributeValue::Any(_) => todo!(),
@@ -158,10 +149,7 @@ impl VirtualDom {
                     let node = &template.dynamic_nodes[idx];
                     let m = self.create_dynamic_node(mutations, template, node, idx);
                     if m > 0 {
-                        mutations.push(ReplacePlaceholder {
-                            m,
-                            path: &template.template.node_paths[idx][1..],
-                        });
+                        mutations.replace_placeholder(m, &template.template.node_paths[idx][1..]);
                     }
                 }
             }
@@ -172,7 +160,7 @@ impl VirtualDom {
 
     pub(crate) fn create_static_node<'a>(
         &mut self,
-        mutations: &mut Vec<Mutation<'a>>,
+        mutations: &mut B::MutationStore<'a>,
         template: &'a VNode<'a>,
         node: &'a TemplateNode<'static>,
     ) {
@@ -180,12 +168,14 @@ impl VirtualDom {
             // Todo: create the children's template
             TemplateNode::Dynamic(_) => {
                 let id = self.next_element(template);
-                mutations.push(CreatePlaceholder { id })
+                mutations.create_placeholder(id);
             }
-            TemplateNode::Text(value) => mutations.push(CreateStaticText { value }),
-            TemplateNode::DynamicText { .. } => mutations.push(CreateStaticText {
-                value: "placeholder",
-            }),
+            TemplateNode::Text(value) => {
+                mutations.create_static_text(value);
+            }
+            TemplateNode::DynamicText { .. } => {
+                mutations.create_static_text("placeholder");
+            }
 
             TemplateNode::Element {
                 attrs,
@@ -196,26 +186,21 @@ impl VirtualDom {
             } => {
                 let id = self.next_element(template);
 
-                mutations.push(CreateElement {
-                    name: tag,
-                    namespace,
-                    id,
-                });
+                mutations.create_element(tag, namespace, id);
 
-                mutations.extend(attrs.into_iter().filter_map(|attr| match attr {
-                    TemplateAttribute::Static {
-                        name,
-                        value,
-                        namespace,
-                        ..
-                    } => Some(SetAttribute {
-                        name,
-                        value,
-                        id,
-                        ns: *namespace,
-                    }),
-                    _ => None,
-                }));
+                for attr in attrs {
+                    match attr {
+                        TemplateAttribute::Static {
+                            name,
+                            value,
+                            namespace,
+                            ..
+                        } => {
+                            mutations.set_attribute(name, *namespace, value, id);
+                        }
+                        _ => (),
+                    }
+                }
 
                 if children.is_empty() && inner_opt {
                     return;
@@ -225,14 +210,14 @@ impl VirtualDom {
                     .into_iter()
                     .for_each(|child| self.create_static_node(mutations, template, child));
 
-                mutations.push(AppendChildren { m: children.len() })
+                mutations.append_children(children.len())
             }
         }
     }
 
     pub(crate) fn create_dynamic_node<'a>(
         &mut self,
-        mutations: &mut Mutations<'a>,
+        mutations: &mut Mutations<'a, B::MutationStore<'a>>,
         template: &'a VNode<'a>,
         node: &'a DynamicNode<'a>,
         idx: usize,
@@ -241,11 +226,7 @@ impl VirtualDom {
             DynamicNode::Text { id, value, .. } => {
                 let new_id = self.next_element(template);
                 id.set(new_id);
-                mutations.push(HydrateText {
-                    id: new_id,
-                    path: &template.template.node_paths[idx][1..],
-                    value,
-                });
+                mutations.hydrate_text(&template.template.node_paths[idx][1..], value, new_id);
                 0
             }
 
@@ -273,13 +254,10 @@ impl VirtualDom {
                         placeholder.set(Some(new_id));
                         self.scopes[scope.0].placeholder.set(Some(new_id));
 
-                        mutations.push(AssignId {
-                            id: new_id,
-                            path: &template.template.node_paths[idx][1..],
-                        });
+                        mutations.assign_id(&template.template.node_paths[idx][1..], new_id);
 
                         let boudary = self.scopes[scope.0]
-                            .consume_context::<SuspenseContext>()
+                            .consume_context::<SuspenseContext<B::MutationStore<'static>>>()
                             .unwrap();
 
                         if boudary.placeholder.get().is_none() {
@@ -294,37 +272,33 @@ impl VirtualDom {
                     }
 
                     RenderReturn::Sync(Some(template)) => {
-                        let mutations_to_this_point = mutations.len();
-
-                        self.scope_stack.push(scope);
-                        let mut created = self.create(mutations, template);
-                        self.scope_stack.pop();
-
                         if !self.collected_leaves.is_empty() {
-                            if let Some(boundary) =
-                                self.scopes[scope.0].has_context::<SuspenseContext>()
+                            if let Some(boundary) = self.scopes[scope.0]
+                                .has_context::<SuspenseContext<B::MutationStore<'static>>>()
                             {
                                 // Since this is a boundary, use it as a placeholder
-                                let new_id = self.next_element(template);
+                                let new_id = self.next_element(&template);
                                 placeholder.set(Some(new_id));
                                 self.scopes[scope.0].placeholder.set(Some(new_id));
-                                mutations.push(AssignId {
-                                    id: new_id,
-                                    path: &template.template.node_paths[idx][1..],
-                                });
+                                mutations
+                                    .assign_id(&template.template.node_paths[idx][1..], new_id);
 
                                 // Now connect everything to the boundary
                                 let boundary_mut = boundary;
-                                let split_off = mutations.split_off(mutations_to_this_point);
-                                let split_off: Vec<Mutation> =
+                                let split_off = mutations.take();
+                                let split_off: B::MutationStore<'static> =
                                     unsafe { std::mem::transmute(split_off) };
+
+                                self.scope_stack.push(scope);
+                                let mut created = self.create(mutations, template);
+                                self.scope_stack.pop();
 
                                 if boundary_mut.placeholder.get().is_none() {
                                     boundary_mut.placeholder.set(Some(new_id));
                                 }
 
                                 // In the generated edits, we want to pick off from where we left off.
-                                boundary_mut.mutations.borrow_mut().edits.extend(split_off);
+                                boundary_mut.mutations.borrow_mut().edits.append(split_off);
 
                                 boundary_mut
                                     .waiting_on
@@ -332,8 +306,12 @@ impl VirtualDom {
                                     .extend(self.collected_leaves.drain(..));
 
                                 created = 0;
+                                return created;
                             }
                         }
+                        self.scope_stack.push(scope);
+                        let mut created = self.create(mutations, template);
+                        self.scope_stack.pop();
 
                         // handle any waiting on futures accumulated by async calls down the tree
                         // if this is a boundary, we split off the tree
@@ -352,10 +330,7 @@ impl VirtualDom {
             DynamicNode::Placeholder(slot) => {
                 let id = self.next_element(template);
                 slot.set(id);
-                mutations.push(AssignId {
-                    path: &template.template.node_paths[idx][1..],
-                    id,
-                });
+                mutations.assign_id(&template.template.node_paths[idx][1..], id);
 
                 0
             }

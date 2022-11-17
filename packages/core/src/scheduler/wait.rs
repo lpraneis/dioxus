@@ -3,13 +3,13 @@ use std::task::{Context, Poll};
 
 use crate::{
     factory::RenderReturn,
-    innerlude::{Mutation, Mutations, SuspenseContext},
-    ScopeId, TaskId, VNode, VirtualDom,
+    innerlude::{MutationStore, MutationStoreBuilder, Mutations, SuspenseContext},
+    TaskId, VNode, VirtualDom,
 };
 
-use super::{waker::RcWake, SuspenseId, SuspenseLeaf};
+use super::{waker::RcWake, SuspenseId};
 
-impl VirtualDom {
+impl<B: MutationStoreBuilder> VirtualDom<B> {
     /// Handle notifications by tasks inside the scheduler
     ///
     /// This is precise, meaning we won't poll every task, just tasks that have woken up as notified to use by the
@@ -54,15 +54,12 @@ impl VirtualDom {
         // continue rendering the tree until we hit yet another suspended component
         if let Poll::Ready(new_nodes) = as_pinned_mut.poll_unpin(&mut cx) {
             let fiber = &self.scopes[leaf.scope_id.0]
-                .consume_context::<SuspenseContext>()
+                .consume_context::<SuspenseContext<B::MutationStore<'static>>>()
                 .unwrap();
 
             println!("ready pool");
 
-            println!(
-                "Existing mutations {:?}, scope {:?}",
-                fiber.mutations, fiber.id
-            );
+            println!(" scope {:?}", fiber.id);
 
             let scope = &mut self.scopes[scope_id.0];
             let arena = scope.current_frame();
@@ -76,16 +73,14 @@ impl VirtualDom {
                 let mutations_ref = &mut fiber.mutations.borrow_mut();
                 let mutations = &mut **mutations_ref;
                 let template: &VNode = unsafe { std::mem::transmute(template) };
-                let mutations: &mut Mutations = unsafe { std::mem::transmute(mutations) };
+                let mutations: &mut Mutations<'static, B::MutationStore<'static>> =
+                    unsafe { std::mem::transmute(mutations) };
 
                 let place_holder_id = scope.placeholder.get().unwrap();
                 self.scope_stack.push(scope_id);
                 let created = self.create(mutations, template);
                 self.scope_stack.pop();
-                mutations.push(Mutation::ReplaceWith {
-                    id: place_holder_id,
-                    m: created,
-                });
+                mutations.replace(place_holder_id, created);
 
                 // for leaf in self.collected_leaves.drain(..) {
                 //     fiber.waiting_on.borrow_mut().insert(leaf);

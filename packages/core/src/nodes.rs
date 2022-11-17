@@ -179,6 +179,20 @@ impl<'a> AttributeValue<'a> {
     }
 }
 
+impl Clone for AttributeValue<'_> {
+    fn clone(&self) -> Self {
+        match self {
+            AttributeValue::Text(text) => AttributeValue::Text(*text),
+            AttributeValue::Float(float) => AttributeValue::Float(*float),
+            AttributeValue::Int(int) => AttributeValue::Int(*int),
+            AttributeValue::Bool(bool) => AttributeValue::Bool(*bool),
+            AttributeValue::Listener(_) => AttributeValue::None,
+            AttributeValue::Any(any) => AttributeValue::Any(*any),
+            AttributeValue::None => AttributeValue::None,
+        }
+    }
+}
+
 impl<'a> std::fmt::Debug for AttributeValue<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

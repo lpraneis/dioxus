@@ -1,4 +1,4 @@
-use crate::{nodes::VNode, virtual_dom::VirtualDom};
+use crate::{innerlude::MutationStoreBuilder, nodes::VNode, virtual_dom::VirtualDom};
 
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -18,7 +18,7 @@ impl ElementPath {
     }
 }
 
-impl VirtualDom {
+impl<B: MutationStoreBuilder> VirtualDom<B> {
     pub fn next_element(&mut self, template: &VNode) -> ElementId {
         let entry = self.elements.vacant_entry();
         let id = entry.key();

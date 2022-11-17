@@ -1,6 +1,9 @@
-use crate::{nodes::VNode, scopes::ScopeId, virtual_dom::VirtualDom, DynamicNode, Mutations};
+use crate::{
+    innerlude::MutationStoreBuilder, nodes::VNode, scopes::ScopeId, virtual_dom::VirtualDom,
+    DynamicNode, Mutations,
+};
 
-impl<'b> VirtualDom {
+impl<'b, B: MutationStoreBuilder> VirtualDom<B> {
     pub fn drop_scope(&mut self, id: ScopeId) {
         // let scope = self.scopes.get(id.0).unwrap();
 
@@ -13,7 +16,7 @@ impl<'b> VirtualDom {
 
     pub fn drop_template(
         &mut self,
-        mutations: &mut Mutations,
+        mutations: &mut Mutations<'b, B::MutationStore<'b>>,
         template: &'b VNode<'b>,
         gen_roots: bool,
     ) {

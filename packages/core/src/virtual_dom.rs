@@ -4,7 +4,7 @@ use crate::{
     arena::ElementPath,
     diff::DirtyScope,
     factory::RenderReturn,
-    innerlude::{Mutations, Scheduler, SchedulerMsg},
+    innerlude::{MutationStore, MutationStoreBuilder, Mutations, Scheduler, SchedulerMsg},
     mutations::Mutation,
     nodes::{Template, TemplateId},
     scheduler::{SuspenseBoundary, SuspenseId},
@@ -13,12 +13,12 @@ use crate::{
 };
 use futures_util::{pin_mut, FutureExt, StreamExt};
 use slab::Slab;
-use std::future::Future;
-use std::rc::Rc;
 use std::{
     any::Any,
     collections::{BTreeSet, HashMap},
 };
+use std::{cell::RefMut, rc::Rc};
+use std::{future::Future, marker::PhantomData};
 
 /// A virtual node system that progresses user events and diffs UI trees.
 ///
@@ -143,7 +143,10 @@ use std::{
 ///    real_dom.apply(dom.render_immediate());
 /// }
 /// ```
-pub struct VirtualDom {
+pub struct VirtualDom<B: MutationStoreBuilder>
+where
+    B::MutationStore<'static>: 'static,
+{
     pub(crate) templates: HashMap<TemplateId, Template<'static>>,
     pub(crate) elements: Slab<ElementPath>,
     pub(crate) scopes: Slab<ScopeState>,
@@ -160,9 +163,15 @@ pub struct VirtualDom {
     pub(crate) finished_fibers: Vec<ScopeId>,
 
     pub(crate) rx: futures_channel::mpsc::UnboundedReceiver<SchedulerMsg>,
+
+    // this enforces that only one type of mutation store can be used per virtual dom
+    mutation_builder: PhantomData<B>,
 }
 
-impl VirtualDom {
+impl<B: MutationStoreBuilder> VirtualDom<B>
+where
+    B::MutationStore<'static>: 'static,
+{
     /// Create a new VirtualDom with a component that does not have special props.
     ///
     /// # Description
@@ -233,6 +242,7 @@ impl VirtualDom {
             dirty_scopes: BTreeSet::new(),
             collected_leaves: Vec::new(),
             finished_fibers: Vec::new(),
+            mutation_builder: PhantomData,
         };
 
         let root = dom.new_scope(Box::into_raw(Box::new(VComponentProps::new(
@@ -243,7 +253,9 @@ impl VirtualDom {
 
         // The root component is always a suspense boundary for any async children
         // This could be unexpected, so we might rethink this behavior
-        root.provide_context(SuspenseBoundary::new(ScopeId(0)));
+        root.provide_context(SuspenseBoundary::<B::MutationStore<'static>>::new(ScopeId(
+            0,
+        )));
 
         // the root element is always given element 0
         dom.elements.insert(ElementPath::null());
@@ -266,7 +278,7 @@ impl VirtualDom {
 
     fn is_scope_suspended(&self, id: ScopeId) -> bool {
         !self.scopes[id.0]
-            .consume_context::<SuspenseContext>()
+            .consume_context::<SuspenseContext<B::MutationStore<'static>>>()
             .unwrap()
             .waiting_on
             .borrow()
@@ -418,14 +430,14 @@ impl VirtualDom {
     ///
     /// apply_edits(edits);
     /// ```
-    pub fn rebuild<'a>(&'a mut self) -> Mutations<'a> {
+    pub fn rebuild<'a>(&'a mut self) -> Mutations<'a, B::MutationStore<'a>> {
         let mut mutations = Mutations::new(0);
 
         let root_node = unsafe { self.run_scope_extend(ScopeId(0)) };
         match root_node {
             RenderReturn::Sync(Some(node)) => {
                 let m = self.create_scope(ScopeId(0), &mut mutations, node);
-                mutations.push(Mutation::AppendChildren { m });
+                mutations.append_children(m);
             }
             RenderReturn::Sync(None) => {}
             RenderReturn::Async(_) => unreachable!("Root scope cannot be an async component"),
@@ -436,7 +448,7 @@ impl VirtualDom {
 
     /// Render whatever the VirtualDom has ready as fast as possible without requiring an executor to progress
     /// suspended subtrees.
-    pub fn render_immediate(&mut self) -> Mutations {
+    pub fn render_immediate<'a>(&'a mut self) -> Mutations<'a, B::MutationStore<'a>> {
         // Build a waker that won't wake up since our deadline is already expired when it's polled
         let waker = futures_util::task::noop_waker();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -458,26 +470,30 @@ impl VirtualDom {
     pub async fn render_with_deadline<'a>(
         &'a mut self,
         deadline: impl Future<Output = ()>,
-    ) -> Mutations<'a> {
+    ) -> Mutations<'a, B::MutationStore<'a>> {
         use futures_util::future::{select, Either};
 
-        let mut mutations = Mutations::new(0);
+        let mut mutations = Mutations::<B::MutationStore<'a>>::new(0);
         pin_mut!(deadline);
 
         loop {
             // first, unload any complete suspense trees
             for finished_fiber in self.finished_fibers.drain(..) {
                 let scope = &mut self.scopes[finished_fiber.0];
-                let context = scope.has_context::<SuspenseContext>().unwrap();
-                println!("unloading suspense tree {:?}", context.mutations);
+                let context: Rc<SuspenseBoundary<B::MutationStore<'static>>> = scope
+                    .has_context::<SuspenseContext<B::MutationStore<'static>>>()
+                    .unwrap();
+                println!("unloading suspense tree");
 
-                mutations.extend(context.mutations.borrow_mut().template_mutations.drain(..));
-                mutations.extend(context.mutations.borrow_mut().drain(..));
+                // let mut borrow: RefMut<'_, Mutations<'static, B::MutationStore<'static>>> =
+                //     context.mutations.borrow_mut();
+                let mut borrow = context.mutations.borrow_mut();
+                let borrow1: B::MutationStore<'a> =
+                    B::MutationStore::<'a>::transmute_as_this(borrow.edits.take());
+                mutations.append(borrow.template_mutations.take());
+                mutations.append(borrow.edits.take());
 
-                mutations.push(Mutation::ReplaceWith {
-                    id: context.placeholder.get().unwrap(),
-                    m: 1,
-                })
+                mutations.replace(context.placeholder.get().unwrap(), 1);
             }
 
             // Next, diff any dirty scopes
@@ -495,14 +511,14 @@ impl VirtualDom {
             // Wait for suspense, or a deadline
             if self.dirty_scopes.is_empty() {
                 if self.scheduler.leaves.borrow().is_empty() {
-                    return mutations;
+                    return Mutations::<B::MutationStore<'_>>::new(0);
                 }
 
                 let (work, deadline) = (self.wait_for_work(), &mut deadline);
                 pin_mut!(work);
 
                 if let Either::Left((_, _)) = select(deadline, work).await {
-                    return mutations;
+                    return Mutations::<B::MutationStore<'_>>::new(0);
                 }
             }
         }
@@ -526,7 +542,7 @@ impl VirtualDom {
     }
 }
 
-impl Drop for VirtualDom {
+impl<B: MutationStoreBuilder> Drop for VirtualDom<B> {
     fn drop(&mut self) {
         // self.drop_scope(ScopeId(0));
     }

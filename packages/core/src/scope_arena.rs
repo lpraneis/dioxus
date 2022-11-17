@@ -3,7 +3,7 @@ use crate::{
     arena::ElementId,
     bump_frame::BumpFrame,
     factory::RenderReturn,
-    innerlude::{SuspenseId, SuspenseLeaf},
+    innerlude::{MutationStoreBuilder, SuspenseId, SuspenseLeaf},
     scheduler::RcWake,
     scopes::{ScopeId, ScopeState},
     virtual_dom::VirtualDom,
@@ -16,7 +16,7 @@ use std::{
     task::{Context, Poll},
 };
 
-impl VirtualDom {
+impl<B: MutationStoreBuilder> VirtualDom<B> {
     pub(super) fn new_scope(&mut self, props: *mut dyn AnyProps<'static>) -> &mut ScopeState {
         let parent = self.acquire_current_scope_raw();
         let container = self.acquire_current_container();
