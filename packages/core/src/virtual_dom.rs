@@ -488,10 +488,11 @@ where
                 // let mut borrow: RefMut<'_, Mutations<'static, B::MutationStore<'static>>> =
                 //     context.mutations.borrow_mut();
                 let mut borrow = context.mutations.borrow_mut();
-                let borrow1: B::MutationStore<'a> =
-                    B::MutationStore::<'a>::transmute_as_this(borrow.edits.take());
-                mutations.append(borrow.template_mutations.take());
-                mutations.append(borrow.edits.take());
+                let edits: B::MutationStore<'a> = B::downcast_lifetime(borrow.edits.take());
+                let template_mutations: B::MutationStore<'a> =
+                    B::downcast_lifetime(borrow.template_mutations.take());
+                mutations.append(template_mutations);
+                mutations.append(edits);
 
                 mutations.replace(context.placeholder.get().unwrap(), 1);
             }

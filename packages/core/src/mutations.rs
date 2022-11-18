@@ -38,6 +38,12 @@ pub trait MutationStoreBuilder {
     type MutationStore<'a>: MutationStore<'a>;
 
     fn create<'a>() -> Self::MutationStore<'a>;
+
+    fn downcast_lifetime<'a>(this: Self::MutationStore<'static>) -> Self::MutationStore<'a>;
+
+    unsafe fn transmute_to_static_lifetime<'a>(
+        this: Self::MutationStore<'a>,
+    ) -> Self::MutationStore<'static>;
 }
 
 struct VecMutation;
@@ -47,6 +53,16 @@ impl MutationStoreBuilder for VecMutation {
 
     fn create<'a>() -> Self::MutationStore<'a> {
         Vec::new()
+    }
+
+    fn downcast_lifetime<'a>(this: Self::MutationStore<'static>) -> Self::MutationStore<'a> {
+        this
+    }
+
+    unsafe fn transmute_to_static_lifetime<'a>(
+        this: Self::MutationStore<'a>,
+    ) -> Self::MutationStore<'static> {
+        std::mem::transmute(this)
     }
 }
 
@@ -161,14 +177,6 @@ pub enum Mutation<'a> {
 }
 
 pub trait MutationStore<'a>: Default {
-    fn transmute_as_this(other: (impl MutationStore<'a> + Any)) -> Self {
-        let boxed: Box<dyn Any> = Box::new(other);
-        if let Ok(this) = boxed.downcast::<Self>() {
-            *this
-        } else {
-            panic!("transmute_as_this failed");
-        }
-    }
     fn append(&mut self, other: Self);
     fn len(&self) -> usize;
     fn take(&mut self) -> Self {

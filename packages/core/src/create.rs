@@ -286,8 +286,8 @@ impl<B: MutationStoreBuilder> VirtualDom<B> {
                                 // Now connect everything to the boundary
                                 let boundary_mut = boundary;
                                 let split_off = mutations.take();
-                                let split_off: B::MutationStore<'static> =
-                                    unsafe { std::mem::transmute(split_off) };
+                                let split_off =
+                                    unsafe { B::transmute_to_static_lifetime(split_off) };
 
                                 self.scope_stack.push(scope);
                                 let mut created = self.create(mutations, template);
