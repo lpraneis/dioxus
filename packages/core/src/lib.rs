@@ -79,6 +79,7 @@ pub use crate::innerlude::{
     Fragment,
     LazyNodes,
     Mutation,
+    MutationStore,
     Mutations,
     NodeFactory,
     Properties,

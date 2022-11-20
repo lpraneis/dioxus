@@ -14,11 +14,15 @@ keywords = ["dom", "ui", "gui", "react", "wasm"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wasm-bindgen = { version = "0.2.79", optional = true }
-js-sys = { version = "0.3.56", optional = true }
-web-sys = { version = "0.3.56", optional = true, features = ["Element", "Node"] }
-
+wasm-bindgen = { version = "0.2.79" }
+js-sys = { version = "0.3.56" }
+web-sys = { version = "0.3.56", features = ["Element", "Node"] }
+# sledgehammer-bindgen = { path = "d:/users/desktop/github/sledgehammer-bindgen" }
+sledgehammer-bindgen = { git = "https://github.com/Demonthos/sledgehammer-bindgen" }
+ux = "0.1.5"
+dioxus-core = { path = "../core" }
+dioxus-html = { path = "../html" }
 
 [features]
 default = []
-web = ["wasm-bindgen", "js-sys", "web-sys"]
+web = []
