@@ -407,3 +407,5 @@ impl<'a> MutationStore<'a> for ByteMutations {
         self.channel.append_children(m as u8);
     }
 }
+
+pub const ALL_JS: &str = GENERATED_JS;

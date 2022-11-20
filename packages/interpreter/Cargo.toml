@@ -17,7 +17,6 @@ keywords = ["dom", "ui", "gui", "react", "wasm"]
 wasm-bindgen = { version = "0.2.79" }
 js-sys = { version = "0.3.56" }
 web-sys = { version = "0.3.56", features = ["Element", "Node"] }
-# sledgehammer-bindgen = { path = "d:/users/desktop/github/sledgehammer-bindgen" }
 sledgehammer-bindgen = { git = "https://github.com/Demonthos/sledgehammer-bindgen" }
 ux = "0.1.5"
 dioxus-core = { path = "../core" }
