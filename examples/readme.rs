@@ -11,6 +11,14 @@ fn main() {
 fn app(cx: Scope) -> Element {
     let mut count = use_state(&cx, || 0);
 
+    cx.spawn(async {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            count.set(count.get() + 1);
+        }
+    });
+
     cx.render(rsx! {
         h1 { "High-Five counter: {count}" }
         button { onclick: move |_| count += 1, "Up high!" }

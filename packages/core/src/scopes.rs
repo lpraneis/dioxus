@@ -855,7 +855,7 @@ impl ScopeState {
     }
 
     /// Pushes the future onto the poll queue to be polled after the component renders.
-    pub fn push_future(&self, fut: impl Future<Output = ()> + 'static) -> TaskId {
+    pub fn push_future<'a>(&'a self, fut: impl Future<Output = ()> + 'a) -> TaskId {
         // wake up the scheduler if it is sleeping
         self.tasks
             .sender
@@ -866,7 +866,7 @@ impl ScopeState {
     }
 
     /// Spawns the future but does not return the [`TaskId`]
-    pub fn spawn(&self, fut: impl Future<Output = ()> + 'static) {
+    pub fn spawn<'a>(&'a self, fut: impl Future<Output = ()> + 'a) {
         self.push_future(fut);
     }
 
@@ -1070,8 +1070,12 @@ pub(crate) struct TaskQueue {
 
 pub(crate) type InnerTask = Pin<Box<dyn Future<Output = ()>>>;
 impl TaskQueue {
-    fn spawn(&self, scope: ScopeId, task: impl Future<Output = ()> + 'static) -> TaskId {
-        let pinned = Box::pin(task);
+    fn spawn<'a>(&'a self, scope: ScopeId, task: impl Future<Output = ()> + 'a) -> TaskId {
+        let boxed: Box<dyn Future<Output = ()> + 'a> = Box::new(task);
+        let raw_ptr: *mut dyn Future<Output = ()> =
+            unsafe { std::mem::transmute(Box::into_raw(boxed)) };
+        let boxed = unsafe { Box::from_raw(raw_ptr) };
+        let pinned = Box::into_pin(boxed);
         let id = self.gen.get();
         self.gen.set(id + 1);
         let tid = TaskId { id, scope };
