@@ -26,7 +26,7 @@ fn app(cx: Scope) -> Element {
         div {
             h1 { "hello world. Count: {val}" }
             button {
-                onclick: move |_| *val.make_mut() += 1,
+                onclick: move |_| *val.write() += 1,
                 "click to increment"
             }
         }

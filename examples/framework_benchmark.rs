@@ -32,7 +32,7 @@ impl Label {
 }
 
 fn app(cx: Scope) -> Element {
-    let items = use_ref(cx, Vec::new);
+    let items = use_state(cx, Vec::new);
     let selected = use_state(cx, || None);
 
     cx.render(rsx! {
@@ -67,7 +67,7 @@ fn app(cx: Scope) -> Element {
             table {
                 tbody {
                     items.read().iter().enumerate().map(|(id, item)| {
-                        let is_in_danger = if (*selected).map(|s| s == id).unwrap_or(false) {"danger"} else {""};
+                        let is_in_danger = if (*selected.read()).map(|s| s == id).unwrap_or(false) {"danger"} else {""};
                         rsx!(tr { class: "{is_in_danger}",
                             td { class:"col-md-1" }
                             td { class:"col-md-1", "{item.key}" }

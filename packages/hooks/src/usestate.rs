@@ -2,7 +2,7 @@
 
 use dioxus_core::prelude::*;
 use std::{
-    cell::{RefCell, RefMut},
+    cell::{Ref, RefCell, RefMut},
     fmt::{Debug, Display},
     ops::{Add, Div, Mul, Not, Sub},
     rc::Rc,
@@ -34,76 +34,38 @@ pub fn use_state<T: 'static>(
     cx: &ScopeState,
     initial_state_fn: impl FnOnce() -> T,
 ) -> &UseState<T> {
-    let hook = cx.use_hook(move || {
-        let current_val = Rc::new(initial_state_fn());
+    cx.use_hook(move || {
         let update_callback = cx.schedule_update();
-        let slot = Rc::new(RefCell::new(current_val.clone()));
+        let slot = Rc::new(RefCell::new(initial_state_fn()));
         let setter = Rc::new({
             to_owned![update_callback, slot];
             move |new| {
                 {
                     let mut slot = slot.borrow_mut();
-
-                    // if there's only one reference (weak or otherwise), we can just swap the values
-                    // Typically happens when the state is set multiple times - we don't want to create a new Rc for each new value
-                    if let Some(val) = Rc::get_mut(&mut slot) {
-                        *val = new;
-                    } else {
-                        *slot = Rc::new(new);
-                    }
+                    *slot = new;
                 }
                 update_callback();
             }
         });
 
         UseState {
-            current_val,
             update_callback,
             setter,
             slot,
         }
-    });
-
-    hook.current_val = hook.slot.borrow().clone();
-
-    hook
+    })
 }
 
 pub struct UseState<T: 'static> {
-    pub(crate) current_val: Rc<T>,
     pub(crate) update_callback: Arc<dyn Fn()>,
     pub(crate) setter: Rc<dyn Fn(T)>,
-    pub(crate) slot: Rc<RefCell<Rc<T>>>,
+    pub(crate) slot: Rc<RefCell<T>>,
 }
 
 impl<T: 'static> UseState<T> {
     /// Set the state to a new value.
     pub fn set(&self, new: T) {
         (self.setter)(new);
-    }
-
-    /// Get the current value of the state by cloning its container Rc.
-    ///
-    /// This is useful when you are dealing with state in async contexts but need
-    /// to know the current value. You are not given a reference to the state.
-    ///
-    /// # Examples
-    /// An async context might need to know the current value:
-    ///
-    /// ```rust, ignore
-    /// fn component(cx: Scope) -> Element {
-    ///     let count = use_state(cx, || 0);
-    ///     cx.spawn({
-    ///         let set_count = count.to_owned();
-    ///         async move {
-    ///             let current = set_count.current();
-    ///         }
-    ///     })
-    /// }
-    /// ```
-    #[must_use]
-    pub fn current(&self) -> Rc<T> {
-        self.slot.borrow().clone()
     }
 
     /// Get the `setter` function directly without the `UseState` wrapper.
@@ -161,23 +123,11 @@ impl<T: 'static> UseState<T> {
     /// }
     /// ```
     pub fn modify(&self, f: impl FnOnce(&T) -> T) {
-        let new_val = {
-            let current = self.slot.borrow();
-            f(current.as_ref())
-        };
+        let new_val = f(&*self.read());
         (self.setter)(new_val);
     }
 
     /// Get the value of the state when this handle was created.
-    ///
-    /// This method is useful when you want an `Rc` around the data to cheaply
-    /// pass it around your app.
-    ///
-    /// ## Warning
-    ///
-    /// This will return a stale value if used within async contexts.
-    ///
-    /// Try `current` to get the real current value of the state.
     ///
     /// ## Example
     ///
@@ -187,23 +137,70 @@ impl<T: 'static> UseState<T> {
     /// fn component(cx: Scope) -> Element {
     ///     let value = use_state(cx, || 0);
     ///
-    ///     let as_rc = value.get();
-    ///     assert_eq!(as_rc.as_ref(), &0);
+    ///     let current = value.get();
+    ///     assert_eq!(current, &0);
     ///
     ///     # todo!()
     /// }
     /// ```
     #[must_use]
-    pub fn get(&self) -> &T {
-        &self.current_val
+    pub fn read(&self) -> Ref<'_, T> {
+        self.slot.borrow()
     }
 
+    /// Mutably unlock the value in the ```RefCell```. This will mark the component as "dirty"
+    ///
+    /// Uses to `borrow_mut` should be as short as possible.
+    ///
+    /// Be very careful when working with this method. If you can, consider using
+    /// the `with` and `with_mut` methods instead, choosing to render Elements
+    /// during the read and write calls.
     #[must_use]
-    pub fn get_rc(&self) -> &Rc<T> {
-        &self.current_val
+    pub fn write(&self) -> RefMut<'_, T> {
+        self.needs_update();
+        self.slot.borrow_mut()
     }
 
-    /// Mark the component that create this [`UseState`] as dirty, forcing it to re-render.
+    /// Take a reference to the inner value termporarily and produce a new value
+    ///
+    /// Note: You can always "reborrow" the value through the ```RefCell```.
+    /// This method just does it for you automatically.
+    ///
+    /// ```rust, ignore
+    /// let val = use_state(|| HashMap::<u32, String>::new());
+    ///
+    ///
+    /// // use reborrowing
+    /// let inner = &*val.read();
+    ///
+    /// // or, be safer and use `with`
+    /// val.with(|i| println!("{:?}", i));
+    /// ```
+    pub fn with<O>(&self, immutable_callback: impl FnOnce(&T) -> O) -> O {
+        immutable_callback(&*self.read())
+    }
+
+    /// Take a reference to the inner value termporarily and produce a new value,
+    /// modifying the original in place.
+    ///
+    /// Note: You can always "reborrow" the value through the ```RefCell```.
+    /// This method just does it for you automatically.
+    ///
+    /// ```rust, ignore
+    /// let val = use_state(|| HashMap::<u32, String>::new());
+    ///
+    ///
+    /// // use reborrowing
+    /// let inner = &mut *val.write();
+    ///
+    /// // or, be safer and use `with`
+    /// val.with_mut(|i| i.insert(1, "hi"));
+    /// ```
+    pub fn with_mut<O>(&self, mutable_callback: impl FnOnce(&mut T) -> O) -> O {
+        mutable_callback(&mut *self.write())
+    }
+
+    /// Mark the component that created this [`UseState`] as dirty, forcing it to re-render.
     ///
     /// ```rust, ignore
     /// fn component(cx: Scope) -> Element {
@@ -222,81 +219,9 @@ impl<T: 'static> UseState<T> {
     }
 }
 
-impl<T: Clone> UseState<T> {
-    /// Get a mutable handle to the value by calling `ToOwned::to_owned` on the
-    /// current value.
-    ///
-    /// This is essentially cloning the underlying value and then setting it,
-    /// giving you a mutable handle in the process. This method is intended for
-    /// types that are cheaply cloneable.
-    ///
-    /// If you are comfortable dealing with `RefMut`, then you can use `make_mut` to get
-    /// the underlying slot. However, be careful with `RefMut` since you might panic
-    /// if the `RefCell` is left open.
-    ///
-    /// # Examples
-    ///
-    /// ```rust, ignore
-    /// let val = use_state(cx, || 0);
-    ///
-    /// val.with_mut(|v| *v = 1);
-    /// ```
-    pub fn with_mut(&self, apply: impl FnOnce(&mut T)) {
-        let mut slot = self.slot.borrow_mut();
-        let mut inner = slot.as_ref().to_owned();
-
-        apply(&mut inner);
-
-        if let Some(new) = Rc::get_mut(&mut slot) {
-            *new = inner;
-        } else {
-            *slot = Rc::new(inner);
-        }
-
-        self.needs_update();
-    }
-
-    /// Get a mutable handle to the value by calling `ToOwned::to_owned` on the
-    /// current value.
-    ///
-    /// This is essentially cloning the underlying value and then setting it,
-    /// giving you a mutable handle in the process. This method is intended for
-    /// types that are cheaply cloneable.
-    ///
-    /// # Warning
-    /// Be careful with `RefMut` since you might panic if the `RefCell` is left open!
-    ///
-    /// # Examples
-    ///
-    /// ```rust, ignore
-    /// let val = use_state(cx, || 0);
-    ///
-    /// *val.make_mut() += 1;
-    /// ```
-    #[must_use]
-    pub fn make_mut(&self) -> RefMut<T> {
-        let mut slot = self.slot.borrow_mut();
-
-        self.needs_update();
-
-        if Rc::strong_count(&*slot) > 0 {
-            *slot = Rc::new(slot.as_ref().to_owned());
-        }
-
-        RefMut::map(slot, |rc| Rc::get_mut(rc).expect("the hard count to be 0"))
-    }
-
-    /// Convert this handle to a tuple of the value and the handle itself.
-    #[must_use]
-    pub fn split(&self) -> (&T, &Self) {
-        (&self.current_val, self)
-    }
-}
-
 impl<T: 'static> Clone for UseState<T> {
     fn clone(&self) -> Self {
         UseState {
-            current_val: self.current_val.clone(),
             update_callback: self.update_callback.clone(),
             setter: self.setter.clone(),
             slot: self.slot.clone(),
@@ -306,46 +231,38 @@ impl<T: 'static> Clone for UseState<T> {
 
 impl<T: 'static + Display> std::fmt::Display for UseState<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.current_val)
+        write!(f, "{}", self.read())
     }
 }
 
 impl<T: std::fmt::Binary> std::fmt::Binary for UseState<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:b}", self.current_val.as_ref())
+        write!(f, "{:b}", *self.read())
     }
 }
 
 impl<T: PartialEq> PartialEq<T> for UseState<T> {
     fn eq(&self, other: &T) -> bool {
-        self.current_val.as_ref() == other
+        &*self.read() == other
     }
 }
 
 // todo: this but for more interesting conrete types
 impl PartialEq<bool> for &UseState<bool> {
     fn eq(&self, other: &bool) -> bool {
-        self.current_val.as_ref() == other
+        &*self.read() == other
     }
 }
 
 impl<T: PartialEq> PartialEq<UseState<T>> for UseState<T> {
     fn eq(&self, other: &UseState<T>) -> bool {
-        Rc::ptr_eq(&self.current_val, &other.current_val)
+        Rc::ptr_eq(&self.slot, &other.slot) || { *self.read() == *other.read() }
     }
 }
 
 impl<T: Debug> Debug for UseState<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.current_val)
-    }
-}
-
-impl<T> std::ops::Deref for UseState<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.current_val.as_ref()
+        write!(f, "{:?}", self.read())
     }
 }
 
@@ -353,7 +270,7 @@ impl<T: Not + Copy> std::ops::Not for &UseState<T> {
     type Output = <T as std::ops::Not>::Output;
 
     fn not(self) -> Self::Output {
-        self.current_val.not()
+        self.read().not()
     }
 }
 
@@ -361,7 +278,7 @@ impl<T: Not + Copy> std::ops::Not for UseState<T> {
     type Output = <T as std::ops::Not>::Output;
 
     fn not(self) -> Self::Output {
-        self.current_val.not()
+        self.read().not()
     }
 }
 
@@ -369,14 +286,14 @@ impl<T: std::ops::Add + Copy> std::ops::Add<T> for &UseState<T> {
     type Output = <T as std::ops::Add>::Output;
 
     fn add(self, other: T) -> Self::Output {
-        *self.current_val.as_ref() + other
+        *self.read() + other
     }
 }
 impl<T: std::ops::Sub + Copy> std::ops::Sub<T> for &UseState<T> {
     type Output = <T as std::ops::Sub>::Output;
 
     fn sub(self, other: T) -> Self::Output {
-        *self.current_val.as_ref() - other
+        *self.read() - other
     }
 }
 
@@ -384,7 +301,7 @@ impl<T: std::ops::Div + Copy> std::ops::Div<T> for &UseState<T> {
     type Output = <T as std::ops::Div>::Output;
 
     fn div(self, other: T) -> Self::Output {
-        *self.current_val.as_ref() / other
+        *self.read() / other
     }
 }
 
@@ -392,55 +309,55 @@ impl<T: std::ops::Mul + Copy> std::ops::Mul<T> for &UseState<T> {
     type Output = <T as std::ops::Mul>::Output;
 
     fn mul(self, other: T) -> Self::Output {
-        *self.current_val.as_ref() * other
+        *self.read() * other
     }
 }
 
 impl<T: Add<Output = T> + Copy> std::ops::AddAssign<T> for &UseState<T> {
     fn add_assign(&mut self, rhs: T) {
-        self.set((*self.current()) + rhs);
+        self.set((*self.read()) + rhs);
     }
 }
 
 impl<T: Sub<Output = T> + Copy> std::ops::SubAssign<T> for &UseState<T> {
     fn sub_assign(&mut self, rhs: T) {
-        self.set((*self.current()) - rhs);
+        self.set((*self.read()) - rhs);
     }
 }
 
 impl<T: Mul<Output = T> + Copy> std::ops::MulAssign<T> for &UseState<T> {
     fn mul_assign(&mut self, rhs: T) {
-        self.set((*self.current()) * rhs);
+        self.set((*self.read()) * rhs);
     }
 }
 
 impl<T: Div<Output = T> + Copy> std::ops::DivAssign<T> for &UseState<T> {
     fn div_assign(&mut self, rhs: T) {
-        self.set((*self.current()) / rhs);
+        self.set((*self.read()) / rhs);
     }
 }
 
 impl<T: Add<Output = T> + Copy> std::ops::AddAssign<T> for UseState<T> {
     fn add_assign(&mut self, rhs: T) {
-        self.set((*self.current()) + rhs);
+        self.set((*self.read()) + rhs);
     }
 }
 
 impl<T: Sub<Output = T> + Copy> std::ops::SubAssign<T> for UseState<T> {
     fn sub_assign(&mut self, rhs: T) {
-        self.set((*self.current()) - rhs);
+        self.set((*self.read()) - rhs);
     }
 }
 
 impl<T: Mul<Output = T> + Copy> std::ops::MulAssign<T> for UseState<T> {
     fn mul_assign(&mut self, rhs: T) {
-        self.set((*self.current()) * rhs);
+        self.set((*self.read()) * rhs);
     }
 }
 
 impl<T: Div<Output = T> + Copy> std::ops::DivAssign<T> for UseState<T> {
     fn div_assign(&mut self, rhs: T) {
-        self.set((*self.current()) / rhs);
+        self.set((*self.read()) / rhs);
     }
 }
 
@@ -452,9 +369,9 @@ fn api_makes_sense() {
 
         val.set(0);
         val.modify(|v| v + 1);
-        let real_current = val.current();
+        let real_current = val.read();
 
-        match val.get() {
+        match *val.read() {
             10 => {
                 val.set(20);
                 val.modify(|v| v + 1);

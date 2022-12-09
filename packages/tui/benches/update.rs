@@ -47,7 +47,7 @@ fn Box(cx: Scope<BoxProps>) -> Element {
     let y = cx.props.y * 2;
     let hue = cx.props.hue;
     let display_hue = cx.props.hue as u32 / 10;
-    let count = count.get();
+    let count = *count.read();
     let alpha = cx.props.alpha + (count % 100) as f32;
 
     cx.render(rsx! {
@@ -71,14 +71,14 @@ struct GridProps {
 fn Grid(cx: Scope<GridProps>) -> Element {
     let size = cx.props.size;
     let count = use_state(cx, || 0);
-    let counts = use_ref(cx, || vec![0; size * size]);
+    let counts = use_state(cx, || vec![0; size * size]);
 
     let ctx: &TuiContext = cx.consume_context().unwrap();
-    if *count.get() + 1 >= (size * size) {
+    if *count.read() + 1 >= (size * size) {
         ctx.quit();
     } else {
         counts.with_mut(|c| {
-            let i = *count.current();
+            let i = *count.read();
             c[i] += 1;
             c[i] %= 360;
         });

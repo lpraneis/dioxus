@@ -40,7 +40,7 @@ fn key_down() {
             PollN::new(3).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         // focus the element
@@ -77,7 +77,7 @@ fn mouse_down() {
             PollN::new(2).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         tui_ctx.inject_event(Event::Mouse(MouseEvent {
@@ -111,7 +111,7 @@ fn mouse_up() {
             PollN::new(3).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         tui_ctx.inject_event(Event::Mouse(MouseEvent {
@@ -150,7 +150,7 @@ fn mouse_enter() {
             PollN::new(3).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         tui_ctx.inject_event(Event::Mouse(MouseEvent {
@@ -189,7 +189,7 @@ fn mouse_exit() {
             PollN::new(3).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         tui_ctx.inject_event(Event::Mouse(MouseEvent {
@@ -228,7 +228,7 @@ fn mouse_move() {
             PollN::new(3).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         tui_ctx.inject_event(Event::Mouse(MouseEvent {
@@ -267,7 +267,7 @@ fn wheel() {
             PollN::new(3).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         tui_ctx.inject_event(Event::Mouse(MouseEvent {
@@ -307,7 +307,7 @@ fn click() {
             PollN::new(3).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         tui_ctx.inject_event(Event::Mouse(MouseEvent {
@@ -346,7 +346,7 @@ fn context_menu() {
             PollN::new(3).await;
             render_count_handle.modify(|x| *x + 1);
         });
-        if *render_count.get() > 2 {
+        if *render_count.read() > 2 {
             panic!("Event was not received");
         }
         tui_ctx.inject_event(Event::Mouse(MouseEvent {

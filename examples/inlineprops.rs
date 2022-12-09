@@ -34,8 +34,8 @@ fn app(cx: Scope) -> Element {
         div {
             Thing1 { _a: 1 },
             Thing2 { _a: 1 },
-            Thing3 { _a: state },
-            Thing4 { _a: state },
+            Thing3 { _a: &*state.read() },
+            Thing4 { _a: &*state.read() },
         }
     })
 }

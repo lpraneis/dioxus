@@ -16,7 +16,7 @@ pub struct Client {
 }
 
 fn app(cx: Scope) -> Element {
-    let clients = use_ref(cx, || vec![] as Vec<Client>);
+    let clients = use_state(cx, || vec![] as Vec<Client>);
     let firstname = use_state(cx, String::new);
     let lastname = use_state(cx, String::new);
     let description = use_state(cx, String::new);
