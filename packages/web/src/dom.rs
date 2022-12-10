@@ -150,10 +150,24 @@ impl WebsysDom {
                     value,
                     id,
                     ns,
-                } => i.set_attribute(id.0 as u32, name, value, ns.unwrap_or_default()),
-                SetBoolAttribute { name, value, id } => {
-                    i.set_attribute(id.0 as u32, name, if *value { "true" } else { "false" }, "")
-                }
+                } => match value {
+                    dioxus_core::AttributeValue::Text(txt) => {
+                        i.set_attribute(id.0 as u32, name, txt, ns.unwrap_or_default())
+                    }
+                    dioxus_core::AttributeValue::Float(f) => {
+                        i.set_attribute(id.0 as u32, name, &f.to_string(), ns.unwrap_or_default())
+                    }
+                    dioxus_core::AttributeValue::Int(n) => {
+                        i.set_attribute(id.0 as u32, name, &n.to_string(), ns.unwrap_or_default())
+                    }
+                    dioxus_core::AttributeValue::Bool(b) => i.set_attribute(
+                        id.0 as u32,
+                        name,
+                        if *b { "true" } else { "false" },
+                        ns.unwrap_or_default(),
+                    ),
+                    _ => unreachable!(),
+                },
                 SetText { value, id } => i.set_text(id.0 as u32, value),
                 NewEventListener { name, id, .. } => {
                     i.new_event_listener(name, id.0 as u32, event_bubbles(&name[2..]) as u8);
