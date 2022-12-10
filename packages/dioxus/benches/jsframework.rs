@@ -45,8 +45,10 @@ fn create_rows(c: &mut Criterion) {
         let _ = dom.rebuild();
 
         b.iter(|| {
-            let g = dom.rebuild();
-            assert!(g.edits.len() > 1);
+            // let g = dom.rebuild();
+            // assert!(g.edits.len() > 1);
+            dom.mark_dirty(ScopeId(0));
+            dom.render_immediate();
         })
     });
 }
@@ -62,7 +64,7 @@ fn Row(cx: Scope<RowProps>) -> Element {
         tr {
             td { class:"col-md-1", "{cx.props.row_id}" }
             td { class:"col-md-1", onclick: move |_| { /* run onselect */ },
-                a { class: "lbl", "{adj}" "{col}" "{noun}" }
+                a { class: "lbl", "{adj} {col} {noun}" }
             }
             td { class: "col-md-1",
                 a { class: "remove", onclick: move |_| {/* remove */},
@@ -87,40 +89,8 @@ impl Label {
     }
 }
 
-static ADJECTIVES: &[&str] = &[
-    "pretty",
-    "large",
-    "big",
-    "small",
-    "tall",
-    "short",
-    "long",
-    "handsome",
-    "plain",
-    "quaint",
-    "clean",
-    "elegant",
-    "easy",
-    "angry",
-    "crazy",
-    "helpful",
-    "mushy",
-    "odd",
-    "unsightly",
-    "adorable",
-    "important",
-    "inexpensive",
-    "cheap",
-    "expensive",
-    "fancy",
-];
+static ADJECTIVES: &[&str] = &["pretty1", "pretty2"];
 
-static COLOURS: &[&str] = &[
-    "red", "yellow", "blue", "green", "pink", "brown", "purple", "brown", "white", "black",
-    "orange",
-];
+static COLOURS: &[&str] = &["red1", "pretty2"];
 
-static NOUNS: &[&str] = &[
-    "table", "chair", "house", "bbq", "desk", "car", "pony", "cookie", "sandwich", "burger",
-    "pizza", "mouse", "keyboard",
-];
+static NOUNS: &[&str] = &["table1", "table2"];

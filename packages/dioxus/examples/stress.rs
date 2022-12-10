@@ -7,7 +7,9 @@ fn main() {
     _ = dom.rebuild();
 
     for _ in 0..1000 {
-        _ = dom.rebuild();
+        dom.mark_dirty(ScopeId(0));
+        // _ = dom.rebuild();
+        dom.render_immediate();
     }
 }
 
