@@ -153,6 +153,7 @@ impl<'a, Ctx: HotReloadingContext> TemplateRenderer<'a, Ctx> {
                     .collect::<Vec<_>>()
                     .as_slice(),
             ),
+            path_nodes: intern(context.path_nodes.as_slice()),
             attr_paths: intern(
                 context
                     .attr_paths
@@ -201,6 +202,7 @@ impl<'a, Ctx: HotReloadingContext> ToTokens for TemplateRenderer<'a, Ctx> {
         let node_printer = &context.dynamic_nodes;
         let dyn_attr_printer = &context.dynamic_attributes;
         let node_paths = context.node_paths.iter().map(|it| quote!(&[#(#it),*]));
+        let node_couter = (0..context.node_paths.len()).map(|i| i as u8);
         let attr_paths = context.attr_paths.iter().map(|it| quote!(&[#(#it),*]));
 
         out_tokens.append_all(quote! {
@@ -216,6 +218,7 @@ impl<'a, Ctx: HotReloadingContext> ToTokens for TemplateRenderer<'a, Ctx> {
                 ),
                 roots: &[ #roots ],
                 node_paths: &[ #(#node_paths),* ],
+                path_nodes: &[ #(#node_couter),* ],
                 attr_paths: &[ #(#attr_paths),* ],
             };
             ::dioxus::core::VNode {
@@ -223,7 +226,6 @@ impl<'a, Ctx: HotReloadingContext> ToTokens for TemplateRenderer<'a, Ctx> {
                 key: #key_tokens,
                 template: std::cell::Cell::new(TEMPLATE),
                 root_ids: Default::default(),
-                // root_ids: std::cell::Cell::from_mut( __cx.bump().alloc([None; #num_roots]) as &mut [::dioxus::core::ElementId]).as_slice_of_cells(),
                 dynamic_nodes: __cx.bump().alloc([ #( #node_printer ),* ]),
                 dynamic_attrs: __cx.bump().alloc([ #( #dyn_attr_printer ),* ]),
             }
@@ -327,6 +329,7 @@ pub struct DynamicContext<'a, Ctx: HotReloadingContext> {
     current_path: Vec<u8>,
 
     node_paths: Vec<Vec<u8>>,
+    path_nodes: Vec<u8>,
     attr_paths: Vec<Vec<u8>>,
 
     phantom: std::marker::PhantomData<Ctx>,
@@ -339,6 +342,7 @@ impl<'a, Ctx: HotReloadingContext> Default for DynamicContext<'a, Ctx> {
             dynamic_attributes: Vec::new(),
             current_path: Vec::new(),
             node_paths: Vec::new(),
+            path_nodes: Vec::new(),
             attr_paths: Vec::new(),
             phantom: std::marker::PhantomData,
         }
@@ -391,11 +395,9 @@ impl<'a, Ctx: HotReloadingContext> DynamicContext<'a, Ctx> {
                             };
                             self.dynamic_attributes.push(attr);
 
-                            if self.attr_paths.len() <= idx {
-                                self.attr_paths.resize_with(idx + 1, Vec::new);
-                            }
-                            self.attr_paths[idx] = self.current_path.clone();
-                            static_attrs.push(TemplateAttribute::Dynamic { id: idx })
+                            let path_id = self.attr_paths.len();
+                            self.attr_paths.push(self.current_path.clone());
+                            static_attrs.push(TemplateAttribute::Dynamic { id: idx, path_id })
                         }
                     }
                 }
@@ -435,14 +437,13 @@ impl<'a, Ctx: HotReloadingContext> DynamicContext<'a, Ctx> {
                 };
                 self.dynamic_nodes.push(root);
 
-                if self.node_paths.len() <= idx {
-                    self.node_paths.resize_with(idx + 1, Vec::new);
-                }
-                self.node_paths[idx] = self.current_path.clone();
+                let path_id = self.node_paths.len();
+                self.node_paths.push(self.current_path.clone());
+                self.path_nodes.push(idx as u8);
 
                 Some(match root {
-                    BodyNode::Text(_) => TemplateNode::DynamicText { id: idx },
-                    _ => TemplateNode::Dynamic { id: idx },
+                    BodyNode::Text(_) => TemplateNode::DynamicText { id: idx, path_id },
+                    _ => TemplateNode::Dynamic { id: idx, path_id },
                 })
             }
         }
@@ -489,7 +490,7 @@ impl<'a, Ctx: HotReloadingContext> DynamicContext<'a, Ctx> {
                         let ct = self.dynamic_attributes.len();
                         self.dynamic_attributes.push(attr);
                         self.attr_paths.push(self.current_path.clone());
-                        quote! { ::dioxus::core::TemplateAttribute::Dynamic { id: #ct } }
+                        quote! { ::dioxus::core::TemplateAttribute::Dynamic { id: #ct, path_id: #ct } }
                     }
                 });
 
@@ -531,9 +532,9 @@ impl<'a, Ctx: HotReloadingContext> DynamicContext<'a, Ctx> {
 
                 match root {
                     BodyNode::Text(_) => {
-                        quote! { ::dioxus::core::TemplateNode::DynamicText { id: #ct } }
+                        quote! { ::dioxus::core::TemplateNode::DynamicText { id: #ct, path_id: #ct } }
                     }
-                    _ => quote! { ::dioxus::core::TemplateNode::Dynamic { id: #ct } },
+                    _ => quote! { ::dioxus::core::TemplateNode::Dynamic { id: #ct, path_id: #ct } },
                 }
             }
         }
@@ -594,13 +595,13 @@ fn create_template() {
                 tag: "svg",
                 namespace: Some("svg"),
                 attrs: &[
-                    TemplateAttribute::Dynamic { id: 0 },
+                    TemplateAttribute::Dynamic { id: 0, path_id: 0 },
                     TemplateAttribute::Static {
                         name: "height",
                         namespace: Some("style"),
                         value: "100px",
                     },
-                    TemplateAttribute::Dynamic { id: 1 },
+                    TemplateAttribute::Dynamic { id: 1, path_id: 1 },
                     TemplateAttribute::Static {
                         name: "height2",
                         namespace: None,
@@ -616,10 +617,11 @@ fn create_template() {
                             text: "hello world",
                         }],
                     },
-                    TemplateNode::Dynamic { id: 0 }
+                    TemplateNode::Dynamic { id: 0, path_id: 0 },
                 ],
             }],
             node_paths: &[&[0, 1,],],
+            path_nodes: &[0, 1],
             attr_paths: &[&[0,], &[0,],],
         },
     )
@@ -712,7 +714,7 @@ fn diff_template() {
                 tag: "div",
                 namespace: None,
                 attrs: &[
-                    TemplateAttribute::Dynamic { id: 1 },
+                    TemplateAttribute::Dynamic { id: 1, path_id: 0 },
                     TemplateAttribute::Static {
                         name: "height",
                         namespace: None,
@@ -723,13 +725,13 @@ fn diff_template() {
                         namespace: None,
                         value: "100px",
                     },
-                    TemplateAttribute::Dynamic { id: 0 },
+                    TemplateAttribute::Dynamic { id: 0, path_id: 1 },
                 ],
                 children: &[
-                    TemplateNode::Dynamic { id: 3 },
-                    TemplateNode::Dynamic { id: 2 },
-                    TemplateNode::Dynamic { id: 1 },
-                    TemplateNode::Dynamic { id: 0 },
+                    TemplateNode::Dynamic { id: 3, path_id: 0 },
+                    TemplateNode::Dynamic { id: 2, path_id: 1 },
+                    TemplateNode::Dynamic { id: 1, path_id: 2 },
+                    TemplateNode::Dynamic { id: 0, path_id: 3 },
                     TemplateNode::Element {
                         tag: "p",
                         namespace: None,
@@ -740,8 +742,9 @@ fn diff_template() {
                     },
                 ],
             }],
-            node_paths: &[&[0, 3], &[0, 2], &[0, 1], &[0, 0]],
+            node_paths: &[&[0, 0], &[0, 1], &[0, 2], &[0, 3]],
+            path_nodes: &[3, 2, 1, 0],
             attr_paths: &[&[0], &[0]]
         },
-    )
+    );
 }

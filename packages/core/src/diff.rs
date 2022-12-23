@@ -967,7 +967,9 @@ fn matching_components<'a>(
         .zip(right_template.roots.iter())
         .map(|(l, r)| {
             let (l, r) = match (l, r) {
-                (TemplateNode::Dynamic { id: l }, TemplateNode::Dynamic { id: r }) => (l, r),
+                (TemplateNode::Dynamic { id: l, .. }, TemplateNode::Dynamic { id: r, .. }) => {
+                    (l, r)
+                }
                 _ => return None,
             };
 

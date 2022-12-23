@@ -66,7 +66,7 @@ impl StringCache {
                         TemplateAttribute::Static { name, value, .. } => {
                             write!(chain, " {}=\"{}\"", name, value)?;
                         }
-                        TemplateAttribute::Dynamic { id: index } => {
+                        TemplateAttribute::Dynamic { id: index, .. } => {
                             chain.segments.push(Segment::Attr(*index))
                         }
                     }
@@ -83,7 +83,7 @@ impl StringCache {
                 cur_path.pop();
             }
             TemplateNode::Text { text } => write!(chain, "{}", text)?,
-            TemplateNode::Dynamic { id: idx } | TemplateNode::DynamicText { id: idx } => {
+            TemplateNode::Dynamic { id: idx, .. } | TemplateNode::DynamicText { id: idx, .. } => {
                 chain.segments.push(Segment::Node(*idx))
             }
         }

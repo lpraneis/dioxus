@@ -167,6 +167,7 @@ impl<'a> VNode<'a> {
                 name: "dioxus-empty",
                 roots: &[],
                 node_paths: &[],
+                path_nodes: &[],
                 attr_paths: &[],
             }),
         })
@@ -178,7 +179,7 @@ impl<'a> VNode<'a> {
     pub fn dynamic_root(&self, idx: usize) -> Option<&'a DynamicNode<'a>> {
         match &self.template.get().roots[idx] {
             TemplateNode::Element { .. } | TemplateNode::Text { text: _ } => None,
-            TemplateNode::Dynamic { id } | TemplateNode::DynamicText { id } => {
+            TemplateNode::Dynamic { id, .. } | TemplateNode::DynamicText { id, .. } => {
                 Some(&self.dynamic_nodes[*id])
             }
         }
@@ -228,6 +229,9 @@ pub struct Template<'a> {
         serde(deserialize_with = "deserialize_bytes_leaky")
     )]
     pub node_paths: &'a [&'a [u8]],
+
+    /// The nodes each path is pointing to
+    pub path_nodes: &'a [u8],
 
     /// The paths of each dynamic attribute relative to the root of the template
     ///
@@ -338,6 +342,8 @@ pub enum TemplateNode<'a> {
     Dynamic {
         /// The index of the dynamic node in the VNode's dynamic_nodes list
         id: usize,
+        /// The index of the path in the Template's node_paths list
+        path_id: usize,
     },
 
     /// This template node is known to be some text, but needs to be created at runtime
@@ -346,6 +352,8 @@ pub enum TemplateNode<'a> {
     DynamicText {
         /// The index of the dynamic node in the VNode's dynamic_nodes list
         id: usize,
+        /// The index of the path in the Template's node_paths list
+        path_id: usize,
     },
 }
 
@@ -464,8 +472,10 @@ pub enum TemplateAttribute<'a> {
     ///
     /// This is the index into the dynamic_attributes field on the container VNode
     Dynamic {
-        /// The index
+        /// The index into the dynamic_attributes field on the container VNode
         id: usize,
+        /// The index into the Template's attribute_paths field
+        path_id: usize,
     },
 }
 
