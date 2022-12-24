@@ -1,6 +1,4 @@
 #![allow(non_upper_case_globals)]
-#[cfg(feature = "hot-reload-context")]
-use crate::{map_global_attributes, map_svg_attributes};
 use crate::{GlobalAttributes, SvgAttributes};
 #[cfg(feature = "hot-reload-context")]
 use dioxus_rsx::HotReloadingContext;
@@ -226,7 +224,7 @@ macro_rules! builder_constructors {
                         }
                     );
                 )*
-                map_global_attributes(attribute).or_else(|| map_svg_attributes(attribute))
+                base::map_global_attributes(attribute).or_else(|| svg::map_svg_attributes(attribute))
             }
 
             fn map_element(element: &str) -> Option<(&'static str, Option<&'static str>)> {
