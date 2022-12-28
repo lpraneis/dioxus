@@ -48,22 +48,7 @@ impl<'a> Mutations<'a> {
 
     /// Push a new mutation into the dom_edits list
     pub(crate) fn push(&mut self, mutation: Mutation<'static>) {
-        self.edits.push(mutation.downcast_lifetime())
-    }
-}
-
-impl Mutations<'static> {
-    pub(crate) fn take(&mut self) -> Mutations<'static> {
-        let subtree = self.subtree;
-        let dirty_scopes: FxHashSet<ScopeId> = self.dirty_scopes.drain().collect();
-        let templates: Vec<Template> = self.templates.split_off(0);
-        let edits: Vec<Mutation> = self.edits.split_off(0);
-        Mutations::<'static> {
-            subtree,
-            dirty_scopes,
-            templates,
-            edits,
-        }
+        self.edits.push(mutation)
     }
 }
 
@@ -258,10 +243,4 @@ pub enum Mutation<'a> {
         /// The ID of the root node to push.
         id: ElementId,
     },
-}
-
-impl Mutation<'static> {
-    pub(crate) fn downcast_lifetime<'a>(self) -> Mutation<'a> {
-        self
-    }
 }

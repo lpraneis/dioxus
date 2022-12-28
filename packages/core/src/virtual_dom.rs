@@ -615,7 +615,9 @@ impl VirtualDom {
 
     /// Swap the current mutations with a new
     fn finalize(&mut self) -> Mutations {
-        self.mutations.take()
+        let mut out = Mutations::default();
+        std::mem::swap(&mut self.mutations, &mut out);
+        out
     }
 }
 
