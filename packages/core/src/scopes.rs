@@ -4,7 +4,7 @@ use crate::{
     arena::ElementId,
     bump_frame::BumpFrame,
     innerlude::{DynamicNode, EventHandler, VComponent, VText},
-    innerlude::{ListenerCb, Scheduler, SchedulerMsg},
+    innerlude::{Scheduler, SchedulerMsg},
     lazynodes::LazyNodes,
     nodes::{ComponentReturn, IntoAttributeValue, IntoDynNode, RenderReturn},
     Attribute, AttributeValue, Element, Event, Properties, TaskId,
