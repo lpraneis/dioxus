@@ -87,11 +87,11 @@ impl<'a> VNode<'a> {
     }
 
     pub(crate) fn clear_listeners(&self) {
-        // for attr in self.dynamic_attrs {
-        //     if let AttributeValue::Listener(l) = &attr.value {
-        //         l.borrow_mut().take();
-        //     }
-        // }
+        for attr in self.dynamic_attrs {
+            // if let AttributeValue::Listener(l) = &attr.value {
+            //     l.borrow_mut().take();
+            // }
+        }
     }
 }
 
@@ -363,7 +363,7 @@ pub enum AttributeValue<'a> {
     // Listener(RefCell<Option<()>>),
 
     /// An arbitrary value that implements PartialEq and is static
-    Any(RefCell<Option<AnyValueContainer>>),
+    // Any(RefCell<Option<AnyValueContainer>>),
 
     /// A "none" value, resulting in the removal of an attribute from the dom
     None,
@@ -377,7 +377,7 @@ impl Clone for AttributeValue<'_> {
             Self::Int(arg0) => Self::Int(arg0.clone()),
             Self::Bool(arg0) => Self::Bool(arg0.clone()),
             // Self::Listener(_) => panic!("ListenerCb cannot be cloned"),
-            Self::Any(arg0) => Self::Any(arg0.clone()),
+            // Self::Any(arg0) => Self::Any(arg0.clone()),
             Self::None => Self::None,
         }
     }
@@ -474,7 +474,7 @@ impl<'a> std::fmt::Debug for AttributeValue<'a> {
             Self::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
             Self::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
             // Self::Listener(_) => f.debug_tuple("Listener").finish(),
-            Self::Any(_) => f.debug_tuple("Any").finish(),
+            // Self::Any(_) => f.debug_tuple("Any").finish(),
             Self::None => write!(f, "None"),
         }
     }
@@ -488,7 +488,7 @@ impl<'a> PartialEq for AttributeValue<'a> {
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             // (Self::Listener(_), Self::Listener(_)) => true,
-            (Self::Any(l0), Self::Any(r0)) => l0 == r0,
+            // (Self::Any(l0), Self::Any(r0)) => l0 == r0,
             _ => false,
         }
     }
@@ -739,8 +739,8 @@ impl<'a> IntoAttributeValue<'a> for Arguments<'_> {
     }
 }
 
-impl<'a> IntoAttributeValue<'a> for AnyValueContainer {
-    fn into_value(self, _: &'a Bump) -> AttributeValue<'a> {
-        AttributeValue::Any(RefCell::new(Some(self)))
-    }
-}
+// impl<'a> IntoAttributeValue<'a> for AnyValueContainer {
+//     fn into_value(self, _: &'a Bump) -> AttributeValue<'a> {
+//         AttributeValue::Any(RefCell::new(Some(self)))
+//     }
+// }

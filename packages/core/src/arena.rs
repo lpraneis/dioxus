@@ -162,9 +162,9 @@ impl VirtualDom {
                 // AttributeValue::Listener(l) => {
                 //     _ = l.take();
                 // }
-                AttributeValue::Any(a) => {
-                    _ = a.take();
-                }
+                // AttributeValue::Any(a) => {
+                //     _ = a.take();
+                // }
                 _ => (),
             }
         });

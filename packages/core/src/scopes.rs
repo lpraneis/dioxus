@@ -377,11 +377,10 @@ impl<'src> ScopeState {
         let mut listeners = self.attributes_to_drop.borrow_mut();
         for attr in element.dynamic_attrs {
             match attr.value {
-                 AttributeValue::Any(_) /*| AttributeValue::Listener(_)*/ => {
-                    let unbounded = unsafe { std::mem::transmute(attr as *const Attribute) };
-                    listeners.push(unbounded);
-                }
-
+                //  AttributeValue::Any(_) /*| AttributeValue::Listener(_)*/ => {
+                //     let unbounded = unsafe { std::mem::transmute(attr as *const Attribute) };
+                //     listeners.push(unbounded);
+                // }
                 _ => (),
             }
         }
