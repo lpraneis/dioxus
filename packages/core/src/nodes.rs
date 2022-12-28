@@ -87,11 +87,11 @@ impl<'a> VNode<'a> {
     }
 
     pub(crate) fn clear_listeners(&self) {
-        for attr in self.dynamic_attrs {
-            if let AttributeValue::Listener(l) = &attr.value {
-                l.0.borrow_mut().take();
-            }
-        }
+        // for attr in self.dynamic_attrs {
+        //     if let AttributeValue::Listener(l) = &attr.value {
+        //         l.borrow_mut().take();
+        //     }
+        // }
     }
 }
 
@@ -339,7 +339,6 @@ pub struct Attribute<'a> {
 /// variant.
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serialize", serde(untagged))]
-#[derive(Clone)]
 pub enum AttributeValue<'a> {
     /// Text attribute
     Text(&'a str),
@@ -354,7 +353,14 @@ pub enum AttributeValue<'a> {
     Bool(bool),
 
     /// A listener, like "onclick"
-    Listener(ListenerCb<'a>),
+    // #[cfg_attr(
+    //     feature = "serialize",
+    //     serde(
+    //         serialize_with = "serialize_listener",
+    //         deserialize_with = "deserialize_listener"
+    //     )
+    // )]
+    // Listener(RefCell<Option<()>>),
 
     /// An arbitrary value that implements PartialEq and is static
     Any(RefCell<Option<AnyValueContainer>>),
@@ -363,33 +369,36 @@ pub enum AttributeValue<'a> {
     None,
 }
 
-pub type ListenerCbInner<'a> = RefCell<Option<BumpBox<'a, dyn FnMut(Event<dyn Any>) + 'a>>>;
-pub struct ListenerCb<'a>(pub ListenerCbInner<'a>);
-
-impl Clone for ListenerCb<'_> {
+impl Clone for AttributeValue<'_> {
     fn clone(&self) -> Self {
-        panic!("ListenerCb cannot be cloned")
+        match self {
+            Self::Text(arg0) => Self::Text(arg0),
+            Self::Float(arg0) => Self::Float(arg0.clone()),
+            Self::Int(arg0) => Self::Int(arg0.clone()),
+            Self::Bool(arg0) => Self::Bool(arg0.clone()),
+            // Self::Listener(_) => panic!("ListenerCb cannot be cloned"),
+            Self::Any(arg0) => Self::Any(arg0.clone()),
+            Self::None => Self::None,
+        }
     }
 }
 
+pub type ListenerCb<'a> = BumpBox<'a, dyn FnMut(Event<dyn Any>) + 'a>;
+
 #[cfg(feature = "serialize")]
-impl<'a> serde::Serialize for ListenerCb<'a> {
-    fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        panic!("ListenerCb cannot be serialized")
-    }
+fn serialize_listener<S>(_: &RefCell<Option<ListenerCb<'_>>>, _: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    panic!("ListenerCb cannot be serialized")
 }
 
 #[cfg(feature = "serialize")]
-impl<'de, 'a> serde::Deserialize<'de> for ListenerCb<'a> {
-    fn deserialize<D>(_: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        panic!("ListenerCb cannot be deserialized")
-    }
+fn deserialize_listener<'de, 'a, D>(_: D) -> Result<RefCell<Option<ListenerCb<'a>>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    panic!("ListenerCb cannot be deserialized")
 }
 
 #[derive(Clone)]
@@ -464,7 +473,7 @@ impl<'a> std::fmt::Debug for AttributeValue<'a> {
             Self::Float(arg0) => f.debug_tuple("Float").field(arg0).finish(),
             Self::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
             Self::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
-            Self::Listener(_) => f.debug_tuple("Listener").finish(),
+            // Self::Listener(_) => f.debug_tuple("Listener").finish(),
             Self::Any(_) => f.debug_tuple("Any").finish(),
             Self::None => write!(f, "None"),
         }
@@ -478,7 +487,7 @@ impl<'a> PartialEq for AttributeValue<'a> {
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
-            (Self::Listener(_), Self::Listener(_)) => true,
+            // (Self::Listener(_), Self::Listener(_)) => true,
             (Self::Any(l0), Self::Any(r0)) => l0 == r0,
             _ => false,
         }
@@ -503,7 +512,7 @@ impl<T: Any + PartialEq + Send + Sync + 'static> AnyValue for T {
         if let Some(other) = other.as_any().downcast_ref() {
             self == other
         } else {
-            return false;
+            false
         }
     }
 
@@ -528,7 +537,7 @@ impl<T: Any + PartialEq + 'static> AnyValue for T {
         if let Some(other) = other.as_any().downcast_ref() {
             self == other
         } else {
-            return false;
+            false
         }
     }
 

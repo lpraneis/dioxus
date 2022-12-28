@@ -159,9 +159,9 @@ impl VirtualDom {
         listeners.drain(..).for_each(|listener| {
             let listener = unsafe { &*listener };
             match &listener.value {
-                AttributeValue::Listener(l) => {
-                    _ = l.0.take();
-                }
+                // AttributeValue::Listener(l) => {
+                //     _ = l.take();
+                // }
                 AttributeValue::Any(a) => {
                     _ = a.take();
                 }

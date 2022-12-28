@@ -78,9 +78,9 @@ impl<'b> VirtualDom {
                     .set(left_attr.mounted_element.get());
 
                 // We want to make sure anything listener that gets pulled is valid
-                if let AttributeValue::Listener(_) = right_attr.value {
-                    self.update_template(left_attr.mounted_element.get(), right_template);
-                }
+                // if let AttributeValue::Listener(_) = right_attr.value {
+                //     self.update_template(left_attr.mounted_element.get(), right_template);
+                // }
 
                 // If the attributes are different (or volatile), we need to update them
                 if left_attr.value != right_attr.value || left_attr.volatile {

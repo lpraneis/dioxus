@@ -5,7 +5,7 @@
 use crate::{
     any_props::VProps,
     arena::{ElementId, ElementRef},
-    innerlude::{DirtyScope, ErrorBoundary, Mutations, Scheduler, SchedulerMsg},
+    innerlude::{DirtyScope, ErrorBoundary, ListenerCb, Mutations, Scheduler, SchedulerMsg},
     mutations::Mutation,
     nodes::RenderReturn,
     nodes::{Template, TemplateId},
@@ -381,15 +381,15 @@ impl VirtualDom {
             // Now that we've accumulated all the parent attributes for the target element, call them in reverse order
             // We check the bubble state between each call to see if the event has been stopped from bubbling
             for listener in listeners.drain(..).rev() {
-                if let AttributeValue::Listener(listener) = listener {
-                    if let Some(cb) = listener.0.borrow_mut().as_deref_mut() {
-                        cb(uievent.clone());
-                    }
+                // if let AttributeValue::Listener(listener) = listener {
+                //     if let Some(cb) = listener.borrow_mut().as_mut() {
+                //         cb(uievent.clone());
+                //     }
 
-                    if !uievent.propogates.get() {
-                        return;
-                    }
-                }
+                //     if !uievent.propogates.get() {
+                //         return;
+                //     }
+                // }
             }
 
             parent_path = template.parent.and_then(|id| self.elements.get(id.0));
@@ -614,7 +614,7 @@ impl VirtualDom {
     }
 
     /// Swap the current mutations with a new
-    fn finalize<'a>(&'a mut self) -> Mutations<'a> {
+    fn finalize(&mut self) -> Mutations {
         self.mutations.take()
     }
 }

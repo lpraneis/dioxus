@@ -53,14 +53,16 @@ impl<'a> Mutations<'a> {
 }
 
 impl Mutations<'static> {
-    pub(crate) fn take<'a>(&mut self) -> Mutations<'a> {
-        Mutations::<'a> {
-            subtree: self.subtree,
-            dirty_scopes: self.dirty_scopes.drain().collect(),
-            templates: self.templates.split_off(0),
-            // Safety: this downcasts the lifetime from 'static to 'a
-            // This is safe because 'static outlives 'a
-            edits: unsafe { std::mem::transmute(self.edits.split_off(0)) },
+    pub(crate) fn take(&mut self) -> Mutations<'static> {
+        let subtree = self.subtree;
+        let dirty_scopes: FxHashSet<ScopeId> = self.dirty_scopes.drain().collect();
+        let templates: Vec<Template> = self.templates.split_off(0);
+        let edits: Vec<Mutation> = self.edits.split_off(0);
+        Mutations::<'static> {
+            subtree,
+            dirty_scopes,
+            templates,
+            edits,
         }
     }
 }
@@ -260,6 +262,6 @@ pub enum Mutation<'a> {
 
 impl Mutation<'static> {
     pub(crate) fn downcast_lifetime<'a>(self) -> Mutation<'a> {
-        unsafe { std::mem::transmute(self) }
+        self
     }
 }

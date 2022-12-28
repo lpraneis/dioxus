@@ -377,7 +377,7 @@ impl<'src> ScopeState {
         let mut listeners = self.attributes_to_drop.borrow_mut();
         for attr in element.dynamic_attrs {
             match attr.value {
-                AttributeValue::Any(_) | AttributeValue::Listener(_) => {
+                 AttributeValue::Any(_) /*| AttributeValue::Listener(_)*/ => {
                     let unbounded = unsafe { std::mem::transmute(attr as *const Attribute) };
                     listeners.push(unbounded);
                 }
@@ -510,7 +510,8 @@ impl<'src> ScopeState {
             }))
         };
 
-        AttributeValue::Listener(ListenerCb(RefCell::new(Some(boxed))))
+        // AttributeValue::Listener(RefCell::new(Some(boxed)))
+        todo!()
     }
 
     /// Store a value between renders. The foundational hook for all other hooks.
