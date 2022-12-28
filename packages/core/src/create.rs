@@ -221,7 +221,7 @@ impl<'b> VirtualDom {
             // }
             _ => {
                 // Safety: we promise not to re-alias this text later on after committing it to the mutation
-                let unbounded_value = unsafe { std::mem::transmute(attribute.value.clone()) };
+                let unbounded_value = unsafe { std::mem::transmute(attribute.value) };
 
                 self.mutations.push(SetAttribute {
                     name: unbounded_name,

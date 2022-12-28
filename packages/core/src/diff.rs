@@ -127,7 +127,7 @@ impl<'b> VirtualDom {
     fn update_attribute(&mut self, right_attr: &Attribute, left_attr: &Attribute) {
         // todo: add more types of attribute values
         let name = unsafe { std::mem::transmute(left_attr.name) };
-        let value = unsafe { std::mem::transmute(right_attr.value.clone()) };
+        let value = unsafe { std::mem::transmute(right_attr.value) };
         self.mutations.push(Mutation::SetAttribute {
             id: left_attr.mounted_element.get(),
             ns: right_attr.namespace,

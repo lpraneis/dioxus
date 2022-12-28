@@ -339,6 +339,7 @@ pub struct Attribute<'a> {
 /// variant.
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serialize", serde(untagged))]
+#[derive(Copy)]
 pub enum AttributeValue<'a> {
     /// Text attribute
     Text(&'a str),
