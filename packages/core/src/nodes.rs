@@ -1,14 +1,10 @@
-use crate::{
-    any_props::AnyProps, arena::ElementId, Element, Event, LazyNodes, ScopeId, ScopeState,
-};
+use crate::{any_props::AnyProps, arena::ElementId, Element, LazyNodes, ScopeId, ScopeState};
 use bumpalo::boxed::Box as BumpBox;
 use bumpalo::Bump;
 use std::{
-    any::{Any, TypeId},
     cell::{Cell, RefCell},
     fmt::Arguments,
     future::Future,
-    ops::Deref,
 };
 
 pub type TemplateId = &'static str;
@@ -87,11 +83,11 @@ impl<'a> VNode<'a> {
     }
 
     pub(crate) fn clear_listeners(&self) {
-        for attr in self.dynamic_attrs {
-            // if let AttributeValue::Listener(l) = &attr.value {
-            //     l.borrow_mut().take();
-            // }
-        }
+        // for attr in self.dynamic_attrs {
+        // if let AttributeValue::Listener(l) = &attr.value {
+        //     l.borrow_mut().take();
+        // }
+        // }
     }
 }
 

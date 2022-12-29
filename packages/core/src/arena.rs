@@ -1,7 +1,4 @@
-use crate::{
-    nodes::RenderReturn, nodes::VNode, virtual_dom::VirtualDom, AttributeValue, DynamicNode,
-    ScopeId,
-};
+use crate::{nodes::RenderReturn, nodes::VNode, virtual_dom::VirtualDom, DynamicNode, ScopeId};
 use bumpalo::boxed::Box as BumpBox;
 
 /// An Element's unique identifier.
@@ -69,11 +66,6 @@ impl VirtualDom {
         }
 
         self.elements.try_remove(el.0)
-    }
-
-    pub(crate) fn update_template(&mut self, el: ElementId, node: &VNode) {
-        let node: *const VNode = node as *const _;
-        self.elements[el.0].template = unsafe { std::mem::transmute(node) };
     }
 
     // Drop a scope and all its children
@@ -155,19 +147,19 @@ impl VirtualDom {
         });
 
         // Now that all the references are gone, we can safely drop our own references in our listeners.
-        let mut listeners = scope.attributes_to_drop.borrow_mut();
-        listeners.drain(..).for_each(|listener| {
-            let listener = unsafe { &*listener };
-            match &listener.value {
-                // AttributeValue::Listener(l) => {
-                //     _ = l.take();
-                // }
-                // AttributeValue::Any(a) => {
-                //     _ = a.take();
-                // }
-                _ => (),
-            }
-        });
+        // let mut listeners = scope.attributes_to_drop.borrow_mut();
+        // listeners.drain(..).for_each(|listener| {
+        // let listener = unsafe { &*listener };
+        // match &listener.value {
+        // AttributeValue::Listener(l) => {
+        //     _ = l.take();
+        // }
+        // AttributeValue::Any(a) => {
+        //     _ = a.take();
+        // }
+        //         _ => (),
+        //     }
+        // });
     }
 }
 
