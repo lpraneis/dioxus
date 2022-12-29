@@ -7,7 +7,7 @@ use crate::{
     nodes::{DynamicNode, VNode},
     scopes::ScopeId,
     virtual_dom::VirtualDom,
-    Attribute, AttributeValue, TemplateNode,
+    Attribute, TemplateNode,
 };
 
 use rustc_hash::{FxHashMap, FxHashSet};

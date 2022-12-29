@@ -88,8 +88,7 @@ pub struct ScopeState {
     pub(crate) spawned_tasks: FxHashSet<TaskId>,
 
     pub(crate) borrowed_props: RefCell<Vec<*const VComponent<'static>>>,
-    pub(crate) attributes_to_drop: RefCell<Vec<*const Attribute<'static>>>,
-
+    // pub(crate) attributes_to_drop: RefCell<Vec<*const Attribute<'static>>>,
     pub(crate) props: Option<Box<dyn AnyProps<'static>>>,
     pub(crate) placeholder: Cell<Option<ElementId>>,
 }
@@ -374,16 +373,16 @@ impl<'src> ScopeState {
     pub fn render(&'src self, rsx: LazyNodes<'src, '_>) -> Element<'src> {
         let element = rsx.call(self);
 
-        let mut listeners = self.attributes_to_drop.borrow_mut();
-        for attr in element.dynamic_attrs {
-            match attr.value {
-                //  AttributeValue::Any(_) /*| AttributeValue::Listener(_)*/ => {
-                //     let unbounded = unsafe { std::mem::transmute(attr as *const Attribute) };
-                //     listeners.push(unbounded);
-                // }
-                _ => (),
-            }
-        }
+        // let mut listeners = self.attributes_to_drop.borrow_mut();
+        // for attr in element.dynamic_attrs {
+        //     match attr.value {
+        //  AttributeValue::Any(_) /*| AttributeValue::Listener(_)*/ => {
+        //     let unbounded = unsafe { std::mem::transmute(attr as *const Attribute) };
+        //     listeners.push(unbounded);
+        // }
+        //         _ => (),
+        //     }
+        // }
 
         let mut props = self.borrowed_props.borrow_mut();
         for node in element.dynamic_nodes {
@@ -498,16 +497,16 @@ impl<'src> ScopeState {
         // This is the suggested way to build a bumpbox
         //
         // In theory, we could just use regular boxes
-        let boxed: BumpBox<'src, dyn FnMut(_) + 'src> = unsafe {
-            BumpBox::from_raw(self.bump().alloc(move |event: Event<dyn Any>| {
-                if let Ok(data) = event.data.downcast::<T>() {
-                    callback(Event {
-                        propogates: event.propogates,
-                        data,
-                    })
-                }
-            }))
-        };
+        // let boxed: BumpBox<'src, dyn FnMut(_) + 'src> = unsafe {
+        //     BumpBox::from_raw(self.bump().alloc(move |event: Event<dyn Any>| {
+        //         if let Ok(data) = event.data.downcast::<T>() {
+        //             callback(Event {
+        //                 propogates: event.propogates,
+        //                 data,
+        //             })
+        //         }
+        //     }))
+        // };
 
         // AttributeValue::Listener(RefCell::new(Some(boxed)))
         todo!()

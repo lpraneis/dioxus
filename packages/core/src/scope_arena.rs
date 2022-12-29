@@ -45,7 +45,7 @@ impl VirtualDom {
             hook_idx: Default::default(),
             shared_contexts: Default::default(),
             borrowed_props: Default::default(),
-            attributes_to_drop: Default::default(),
+            // attributes_to_drop: Default::default(),
         }))
     }
 

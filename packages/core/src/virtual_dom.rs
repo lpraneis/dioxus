@@ -11,7 +11,7 @@ use crate::{
     nodes::{Template, TemplateId},
     scheduler::SuspenseId,
     scopes::{ScopeId, ScopeState},
-    AttributeValue, Element, Event, Scope, SuspenseContext,
+    Element, Event, Scope, SuspenseContext,
 };
 use futures_util::{pin_mut, StreamExt};
 use rustc_hash::FxHashMap;
