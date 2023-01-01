@@ -383,14 +383,10 @@ impl<S: State> RealDom<S> {
         let new_node = node.clone();
         let new_id = self.create_node(new_node);
         mark_dirty(new_id, NodeMask::ALL, nodes_updated);
-        let self_ptr = self as *mut Self;
-        for child in self.tree.children_ids(node_id).unwrap() {
-            unsafe {
-                // this is safe because no node has itself as a child
-                let self_mut = &mut *self_ptr;
-                let child_id = self_mut.clone_node(*child, nodes_updated);
-                self_mut.add_child(new_id, child_id);
-            }
+        for child in self.tree.children_ids(node_id).unwrap().to_vec() {
+            // this is safe because no node has itself as a child
+            let child_id = self.clone_node(child, nodes_updated);
+            self.add_child(new_id, child_id);
         }
         new_id
     }
