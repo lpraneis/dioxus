@@ -211,7 +211,15 @@ impl<'a, T: 'a, Tr: TreeView<T>> Iterator for ChildNodeIteratorMut<'a, T, Tr> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        let owned = self.children_ids.get(self.index).copied();
+        match owned {
+            Some(id) => {
+                self.index += 1;
+
+                Some(unsafe { &mut *self.tree }.get_mut(id).unwrap())
+            }
+            None => None,
+        }
     }
 }
 
