@@ -1,5 +1,6 @@
 use crate::{
-    any_props::AnyProps, arena::ElementId, Element, Event, LazyNodes, ScopeId, ScopeState,
+    any_props::AnyProps, arena::ElementId, diffable_arguments, innerlude::DiffableArguments,
+    Element, Event, LazyNodes, ScopeId, ScopeState,
 };
 use bumpalo::boxed::Box as BumpBox;
 use bumpalo::Bump;
@@ -435,7 +436,7 @@ impl<'a> std::fmt::Debug for VComponent<'a> {
 #[derive(Debug)]
 pub struct VText<'a> {
     /// The actual text itself
-    pub value: &'a str,
+    pub value: DiffableArguments<'a>,
 
     /// The ID of this node in the real DOM
     pub id: Cell<Option<ElementId>>,
@@ -508,7 +509,7 @@ pub struct Attribute<'a> {
 /// variant.
 pub enum AttributeValue<'a> {
     /// Text attribute
-    Text(&'a str),
+    Text(DiffableArguments<'a>),
 
     /// A float
     Float(f64),
@@ -534,11 +535,11 @@ pub type ListenerCb<'a> = BumpBox<'a, dyn FnMut(Event<dyn Any>) + 'a>;
 /// Any of the built-in values that the Dioxus VirtualDom supports as dynamic attributes on elements that are borrowed
 ///
 /// These varients are used to communicate what the value of an attribute is that needs to be updated
-#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serialize", serde(untagged))]
+// #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+// #[cfg_attr(feature = "serialize", serde(untagged))]
 pub enum BorrowedAttributeValue<'a> {
     /// Text attribute
-    Text(&'a str),
+    Text(DiffableArguments<'a>),
 
     /// A float
     Float(f64),
@@ -550,13 +551,13 @@ pub enum BorrowedAttributeValue<'a> {
     Bool(bool),
 
     /// An arbitrary value that implements PartialEq and is static
-    #[cfg_attr(
-        feature = "serialize",
-        serde(
-            deserialize_with = "deserialize_any_value",
-            serialize_with = "serialize_any_value"
-        )
-    )]
+    // #[cfg_attr(
+    //     feature = "serialize",
+    //     serde(
+    //         deserialize_with = "deserialize_any_value",
+    //         serialize_with = "serialize_any_value"
+    //     )
+    // )]
     Any(std::cell::Ref<'a, dyn AnyValue>),
 
     /// A "none" value, resulting in the removal of an attribute from the dom
@@ -566,7 +567,7 @@ pub enum BorrowedAttributeValue<'a> {
 impl<'a> From<&'a AttributeValue<'a>> for BorrowedAttributeValue<'a> {
     fn from(value: &'a AttributeValue<'a>) -> Self {
         match value {
-            AttributeValue::Text(value) => BorrowedAttributeValue::Text(value),
+            AttributeValue::Text(value) => BorrowedAttributeValue::Text(*value),
             AttributeValue::Float(value) => BorrowedAttributeValue::Float(*value),
             AttributeValue::Int(value) => BorrowedAttributeValue::Int(*value),
             AttributeValue::Bool(value) => BorrowedAttributeValue::Bool(*value),
@@ -765,21 +766,34 @@ impl<'a, 'b> IntoDynNode<'a> for LazyNodes<'a, 'b> {
     }
 }
 
-impl<'a> IntoDynNode<'_> for &'a str {
-    fn into_vnode(self, cx: &ScopeState) -> DynamicNode {
-        cx.text_node(format_args!("{}", self))
+impl<'a> IntoDynNode<'a> for &'a str {
+    fn into_vnode(self, cx: &'a ScopeState) -> DynamicNode {
+        cx.text_node(DiffableArguments {
+            static_segments: &["", ""],
+            dynamic_segments: cx
+                .bump()
+                .alloc_slice_copy(&[diffable_arguments::Entry::Str(self)]),
+        })
     }
 }
 
-impl IntoDynNode<'_> for String {
-    fn into_vnode(self, cx: &ScopeState) -> DynamicNode {
-        cx.text_node(format_args!("{}", self))
+impl<'a> IntoDynNode<'a> for String {
+    fn into_vnode(self, cx: &'a ScopeState) -> DynamicNode {
+        cx.text_node(DiffableArguments {
+            static_segments: &["", ""],
+            dynamic_segments: cx.bump().alloc_slice_copy(&[diffable_arguments::Entry::Str(
+                cx.bump().alloc(self).as_str(),
+            )]),
+        })
     }
 }
 
-impl<'b> IntoDynNode<'b> for Arguments<'_> {
+impl<'b> IntoDynNode<'b> for DiffableArguments<'b> {
     fn into_vnode(self, cx: &'b ScopeState) -> DynamicNode<'b> {
-        cx.text_node(self)
+        cx.text_node(DiffableArguments {
+            static_segments: self.static_segments,
+            dynamic_segments: self.dynamic_segments,
+        })
     }
 }
 
@@ -851,8 +865,11 @@ impl<'a> IntoAttributeValue<'a> for AttributeValue<'a> {
 }
 
 impl<'a> IntoAttributeValue<'a> for &'a str {
-    fn into_value(self, _: &'a Bump) -> AttributeValue<'a> {
-        AttributeValue::Text(self)
+    fn into_value(self, bump: &'a Bump) -> AttributeValue<'a> {
+        AttributeValue::Text(DiffableArguments {
+            static_segments: &["", ""],
+            dynamic_segments: bump.alloc_slice_copy(&[diffable_arguments::Entry::Str(self)]),
+        })
     }
 }
 
@@ -874,12 +891,9 @@ impl<'a> IntoAttributeValue<'a> for bool {
     }
 }
 
-impl<'a> IntoAttributeValue<'a> for Arguments<'_> {
-    fn into_value(self, bump: &'a Bump) -> AttributeValue<'a> {
-        use bumpalo::core_alloc::fmt::Write;
-        let mut str_buf = bumpalo::collections::String::new_in(bump);
-        str_buf.write_fmt(self).unwrap();
-        AttributeValue::Text(str_buf.into_bump_str())
+impl<'a> IntoAttributeValue<'a> for DiffableArguments<'a> {
+    fn into_value(self, _: &'a Bump) -> AttributeValue<'a> {
+        AttributeValue::Text(self)
     }
 }
 

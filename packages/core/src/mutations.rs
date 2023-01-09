@@ -1,6 +1,10 @@
 use rustc_hash::FxHashSet;
 
-use crate::{arena::ElementId, innerlude::BorrowedAttributeValue, ScopeId, Template};
+use crate::{
+    arena::ElementId,
+    innerlude::{BorrowedAttributeValue, DiffableArguments},
+    ScopeId, Template,
+};
 
 /// A container for all the relevant steps to modify the Real DOM
 ///
@@ -13,7 +17,7 @@ use crate::{arena::ElementId, innerlude::BorrowedAttributeValue, ScopeId, Templa
 /// Templates, however, apply to all subtrees, not just target subtree.
 ///
 /// Mutations are the only link between the RealDOM and the VirtualDOM.
-#[cfg_attr(feature = "serialize", derive(serde::Serialize))]
+
 #[derive(Debug, Default)]
 #[must_use = "not handling edits can lead to visual inconsistencies in UI"]
 pub struct Mutations<'a> {
@@ -56,11 +60,7 @@ impl<'a> Mutations<'a> {
 /// of the Dioxus VirtualDom.
 ///
 /// These edits can be serialized and sent over the network or through any interface
-#[cfg_attr(
-    feature = "serialize",
-    derive(serde::Serialize, serde::Deserialize),
-    serde(tag = "type")
-)]
+
 #[derive(Debug, PartialEq)]
 pub enum Mutation<'a> {
     /// Add these m children to the target element
@@ -104,7 +104,7 @@ pub enum Mutation<'a> {
     /// Create a node specifically for text with the given value
     CreateTextNode {
         /// The text content of this text node
-        value: &'a str,
+        value: DiffableArguments<'a>,
 
         /// The ID we're assigning to this specific text nodes
         ///
@@ -123,7 +123,7 @@ pub enum Mutation<'a> {
         path: &'static [u8],
 
         /// The value of the textnode that we want to set the placeholder with
-        value: &'a str,
+        value: DiffableArguments<'a>,
 
         /// The ID we're assigning to this specific text nodes
         ///
@@ -208,7 +208,7 @@ pub enum Mutation<'a> {
     /// Set the textcontent of a node.
     SetText {
         /// The textcontent of the node
-        value: &'a str,
+        value: DiffableArguments<'a>,
 
         /// The ID of the node to set the textcontent of.
         id: ElementId,

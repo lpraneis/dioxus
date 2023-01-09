@@ -3,7 +3,7 @@ use crate::{
     any_props::VProps,
     arena::ElementId,
     bump_frame::BumpFrame,
-    innerlude::{DynamicNode, EventHandler, VComponent, VText},
+    innerlude::{DiffableArguments, DynamicNode, EventHandler, VComponent, VText},
     innerlude::{ErrorBoundary, Scheduler, SchedulerMsg},
     lazynodes::LazyNodes,
     nodes::{ComponentReturn, IntoAttributeValue, IntoDynNode, RenderReturn},
@@ -398,22 +398,10 @@ impl<'src> ScopeState {
     }
 
     /// Create a dynamic text node using [`Arguments`] and the [`ScopeState`]'s internal [`Bump`] allocator
-    pub fn text_node(&'src self, args: Arguments) -> DynamicNode<'src> {
+    pub fn text_node(&'src self, args: DiffableArguments<'src>) -> DynamicNode<'src> {
         DynamicNode::Text(VText {
-            value: self.raw_text(args),
+            value: args,
             id: Default::default(),
-        })
-    }
-
-    /// Allocate some text inside the [`ScopeState`] from [`Arguments`]
-    ///
-    /// Uses the currently active [`Bump`] allocator
-    pub fn raw_text(&'src self, args: Arguments) -> &'src str {
-        args.as_str().unwrap_or_else(|| {
-            use bumpalo::core_alloc::fmt::Write;
-            let mut str_buf = bumpalo::collections::String::new_in(self.bump());
-            str_buf.write_fmt(args).unwrap();
-            str_buf.into_bump_str()
         })
     }
 

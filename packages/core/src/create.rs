@@ -1,5 +1,7 @@
 use crate::any_props::AnyProps;
-use crate::innerlude::{BorrowedAttributeValue, VComponent, VPlaceholder, VText};
+use crate::innerlude::{
+    BorrowedAttributeValue, DiffableArguments, VComponent, VPlaceholder, VText,
+};
 use crate::mutations::Mutation;
 use crate::mutations::Mutation::*;
 use crate::nodes::VNode;
@@ -175,15 +177,15 @@ impl<'b> VirtualDom {
             }
             Text(VText { id, value }) => {
                 let id = self.set_slot(template, id, idx);
-                self.create_static_text(value, id);
+                self.create_static_text(*value, id);
                 1
             }
         }
     }
 
-    fn create_static_text(&mut self, value: &str, id: ElementId) {
+    fn create_static_text(&mut self, value: DiffableArguments<'b>, id: ElementId) {
         // Safety: we promise not to re-alias this text later on after committing it to the mutation
-        let unbounded_text: &str = unsafe { std::mem::transmute(value) };
+        let unbounded_text: DiffableArguments = unsafe { std::mem::transmute(value) };
         self.mutations.push(CreateTextNode {
             value: unbounded_text,
             id,

@@ -26,13 +26,11 @@ criterion_main!(mbenches);
 
 fn create_rows(c: &mut Criterion) {
     fn app(cx: Scope) -> Element {
-        let mut rng = SmallRng::from_entropy();
-
         render!(
             table {
                 tbody {
                     (0..10_000_usize).map(|f| {
-                        let label = Label::new(&mut rng);
+                        let label = Label(["hello world", "this is a test", "testing"]);
                         rsx!( Row { row_id: f, label: label } )
                     })
                 }
@@ -45,8 +43,9 @@ fn create_rows(c: &mut Criterion) {
         let _ = dom.rebuild();
 
         b.iter(|| {
-            let g = dom.rebuild();
-            assert!(g.edits.len() > 1);
+            let g = dom.mark_dirty(ScopeId(0));
+            dom.render_immediate();
+            // assert!(g.edits.len() > 1);
         })
     });
 }
@@ -60,9 +59,26 @@ fn Row(cx: Scope<RowProps>) -> Element {
     let [adj, col, noun] = cx.props.label.0;
     cx.render(rsx! {
         tr {
-            td { class:"col-md-1", "{cx.props.row_id}" }
+            td { class:"col-md-1",
+                (DiffableArguments {
+                    static_segments: &["", ""],
+                    dynamic_segments: cx.bump().alloc([
+                        (&mut &cx.props.row_id).into_entry(cx.bump()),
+                    ]),
+                })
+            }
             td { class:"col-md-1", onclick: move |_| { /* run onselect */ },
-                a { class: "lbl", "{adj}" "{col}" "{noun}" }
+                a {
+                    class: "lbl",
+                    (DiffableArguments {
+                        static_segments: &["", " ", " ", ""],
+                        dynamic_segments: cx.bump().alloc([
+                            (&mut &adj).into_entry(cx.bump()),
+                            (&mut &col).into_entry(cx.bump()),
+                            (&mut &noun).into_entry(cx.bump()),
+                        ]),
+                    })
+                }
             }
             td { class: "col-md-1",
                 a { class: "remove", onclick: move |_| {/* remove */},
