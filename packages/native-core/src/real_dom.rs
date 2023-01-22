@@ -195,8 +195,7 @@ impl<S: State<V>, V: FromAnyValue> RealDom<S, V> {
                         text: value.to_string(),
                     });
                     let node_id = self.create_node(node);
-                    let node = self.tree.get_mut(node_id).unwrap();
-                    node.node_data.element_id = Some(id);
+                    self.set_element_id(node_id, id);
                     self.stack.push(node_id);
                     mark_dirty(node_id, NodeMask::new().with_text(), &mut nodes_updated);
                 }
@@ -335,13 +334,13 @@ impl<S: State<V>, V: FromAnyValue> RealDom<S, V> {
             }
         }
 
-        let dirty_nodes = DirtyNodeStates::default();
+        let mut dirty_nodes = DirtyNodeStates::default();
         for (&n, mask) in &nodes_updated {
             // remove any nodes that were created and then removed in the same mutations from the dirty nodes list
-            if self.tree.contains(n) {
+            if let Some(height) = self.tree.height(n) {
                 for (m, p) in S::MASKS.iter().zip(S::PASSES.iter()) {
                     if mask.overlaps(m) {
-                        dirty_nodes.insert(p.pass_id(), n);
+                        dirty_nodes.insert(p.pass_id(), n, height);
                     }
                 }
             }

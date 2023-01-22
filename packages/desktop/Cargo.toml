@@ -8,7 +8,7 @@ license = "MIT/Apache-2.0"
 repository = "https://github.com/DioxusLabs/dioxus/"
 homepage = "https://dioxuslabs.com"
 documentation = "https://dioxuslabs.com"
-keywords = ["dom", "ui", "gui", "react", "wasm"]
+keywords = ["dom", "ui", "gui", "react"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -32,6 +32,7 @@ tokio = { version = "1.16.1", features = [
 webbrowser = "0.8.0"
 infer = "0.11.0"
 dunce = "1.0.2"
+slab = "0.4"
 
 interprocess = { version = "1.1.1", optional = true }
 futures-util = "0.3.25"
