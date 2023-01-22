@@ -13,7 +13,7 @@ use syn::{
 #[derive(PartialEq, Eq, Clone, Debug, Hash)]
 pub struct Element {
     pub name: Ident,
-    pub key: Option<IfmtInput>,
+    pub key: Option<Expr>,
     pub attributes: Vec<ElementAttrNamed>,
     pub children: Vec<BodyNode>,
     pub _is_static: bool,

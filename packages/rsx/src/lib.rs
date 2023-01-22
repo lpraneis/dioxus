@@ -168,7 +168,7 @@ impl<'a> ToTokens for TemplateRenderer<'a> {
         };
 
         let key_tokens = match key {
-            Some(tok) => quote! { Some( __cx.raw_text(#tok) ) },
+            Some(tok) => quote! { Some( #tok ) },
             None => quote! { None },
         };
 

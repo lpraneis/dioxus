@@ -157,9 +157,9 @@ impl WebsysDom {
                     i.assign_id(path.as_ptr() as u32, path.len() as u8, id.0 as u32)
                 }
                 CreatePlaceholder { id } => i.create_placeholder(id.0 as u32),
-                CreateTextNode { value, id } => i.create_text_node(value, id.0 as u32),
+                CreateTextNode { value, id } => i.create_text_node(*value, id.0 as u32),
                 HydrateText { path, value, id } => {
-                    i.hydrate_text(path.as_ptr() as u32, path.len() as u8, value, id.0 as u32)
+                    i.hydrate_text(path.as_ptr() as u32, path.len() as u8, *value, id.0 as u32)
                 }
                 LoadTemplate { name, index, id } => {
                     if let Some(tmpl_id) = self.templates.get(*name) {
@@ -179,7 +179,7 @@ impl WebsysDom {
                     ns,
                 } => match value {
                     BorrowedAttributeValue::Text(txt) => {
-                        i.set_attribute(id.0 as u32, name, txt, ns.unwrap_or_default())
+                        i.set_attribute(id.0 as u32, name, *txt, ns.unwrap_or_default())
                     }
                     BorrowedAttributeValue::Float(f) => {
                         i.set_attribute(id.0 as u32, name, &f.to_string(), ns.unwrap_or_default())
@@ -198,7 +198,7 @@ impl WebsysDom {
                     }
                     _ => unreachable!(),
                 },
-                SetText { value, id } => i.set_text(id.0 as u32, value),
+                SetText { value, id } => i.set_text(id.0 as u32, *value),
                 NewEventListener { name, id, .. } => {
                     i.new_event_listener(name, id.0 as u32, event_bubbles(name) as u8);
                 }

@@ -2,6 +2,7 @@ use bumpalo::collections::Vec as BumpVec;
 use bumpalo::Bump;
 use core::slice;
 use std::fmt::{Display, Formatter, Write};
+use std::hash::Hash;
 use std::hint::black_box;
 
 const fn min_size(slice: &'static [&'static str]) -> usize {
@@ -15,10 +16,17 @@ const fn min_size(slice: &'static [&'static str]) -> usize {
     size
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq)]
 pub struct DiffableArguments<'a> {
     pub static_segments: &'static [&'static str],
     pub dynamic_segments: &'a [Entry<'a>],
+}
+
+impl Hash for DiffableArguments<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.static_segments.as_ptr().hash(state);
+        self.dynamic_segments.hash(state);
+    }
 }
 
 impl<'a> DiffableArguments<'a> {
@@ -73,6 +81,37 @@ impl<'a> DiffableArguments<'a> {
     }
 }
 
+impl<'a> sledgehammer_utils::Writable for DiffableArguments<'a> {
+    fn write(self, into: &mut Vec<u8>) {
+        for (static_seg, dynamic_seg) in self
+            .static_segments
+            .iter()
+            .zip(self.dynamic_segments.iter())
+        {
+            (*static_seg).write(into);
+            match dynamic_seg {
+                Entry::U64(u) => {
+                    sledgehammer_utils::Writable::write(*u, into);
+                }
+                Entry::Usize(u) => {
+                    sledgehammer_utils::Writable::write(*u, into);
+                }
+                Entry::I64(i) => {
+                    sledgehammer_utils::Writable::write(*i, into);
+                }
+                Entry::F64(_) => todo!(),
+                Entry::Bool(b) => match b {
+                    true => sledgehammer_utils::Writable::write("true", into),
+                    false => sledgehammer_utils::Writable::write("false", into),
+                },
+                Entry::Char(c) => sledgehammer_utils::Writable::write(*c, into),
+                Entry::Str(s) => sledgehammer_utils::Writable::write(*s, into),
+            }
+        }
+        (*self.static_segments.last().unwrap()).write(into);
+    }
+}
+
 #[test]
 fn displays() {
     let bump = Bump::new();
@@ -118,6 +157,23 @@ pub enum Entry<'a> {
     Bool(bool),
     Char(char),
     Str(&'a str),
+}
+
+impl Eq for Entry<'_> {}
+impl std::hash::Hash for Entry<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let self_tag = core::mem::discriminant(self);
+        ::core::hash::Hash::hash(&self_tag, state);
+        match self {
+            Entry::U64(u) => ::core::hash::Hash::hash(u, state),
+            Entry::Usize(u) => ::core::hash::Hash::hash(u, state),
+            Entry::I64(i) => ::core::hash::Hash::hash(i, state),
+            Entry::F64(_) => todo!(),
+            Entry::Bool(b) => ::core::hash::Hash::hash(b, state),
+            Entry::Char(c) => ::core::hash::Hash::hash(c, state),
+            Entry::Str(s) => ::core::hash::Hash::hash(s, state),
+        }
+    }
 }
 
 pub trait IntoEntry<'a> {

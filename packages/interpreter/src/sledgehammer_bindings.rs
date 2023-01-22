@@ -1,9 +1,11 @@
 use js_sys::Function;
 use sledgehammer_bindgen::bindgen;
+use sledgehammer_utils::Writable;
 use web_sys::Node;
 
 #[bindgen]
 mod js {
+
     const JS: &str = r#"
     class ListenerMap {
         constructor(root) {
@@ -197,7 +199,7 @@ mod js {
     fn create_raw_text(text: &str) {
         "{stack.push(document.createTextNode($text$));}"
     }
-    fn create_text_node(text: &str, id: u32) {
+    fn create_text_node(text: impl Writable, id: u32) {
         "{node = document.createTextNode($text$); nodes[$id$] = node; stack.push(node);}"
     }
     fn create_placeholder(id: u32) {
@@ -209,10 +211,10 @@ mod js {
     fn remove_event_listener(event_name: &str<u8, evt>, id: u32, bubbles: u8) {
         "{node = nodes[$id$]; node.listening -= 1; node.removeAttribute('data-dioxus-id'); listeners.remove(node, $event_name$, $bubbles$);}"
     }
-    fn set_text(id: u32, text: &str) {
+    fn set_text(id: u32, text: impl Writable) {
         "{nodes[$id$].textContent = $text$;}"
     }
-    fn set_attribute(id: u32, field: &str<u8, attr>, value: &str, ns: &str<u8, ns_cache>) {
+    fn set_attribute(id: u32, field: &str<u8, attr>, value: impl Writable, ns: &str<u8, ns_cache>) {
         "{node = nodes[$id$]; SetAttributeInner(node, $field$, $value$, $ns$);}"
     }
     fn remove_attribute(id: u32, field: &str<u8, attr>, ns: &str<u8, ns_cache>) {
@@ -237,7 +239,7 @@ mod js {
     fn assign_id(ptr: u32, len: u8, id: u32) {
         "{nodes[$id$] = LoadChild($ptr$, $len$);}"
     }
-    fn hydrate_text(ptr: u32, len: u8, value: &str, id: u32) {
+    fn hydrate_text(ptr: u32, len: u8, value: impl Writable, id: u32) {
         r#"{
             node = LoadChild($ptr$, $len$);
             if (node.nodeType == Node.TEXT_NODE) {

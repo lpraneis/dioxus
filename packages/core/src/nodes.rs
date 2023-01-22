@@ -49,7 +49,7 @@ pub struct VNode<'a> {
     /// The key given to the root of this template.
     ///
     /// In fragments, this is the key of the first child. In other cases, it is the key of the root.
-    pub key: Option<&'a str>,
+    pub key: Option<DiffableArguments<'a>>,
 
     /// When rendered, this template will be linked to its parent manually
     pub parent: Option<ElementId>,

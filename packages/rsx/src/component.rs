@@ -56,14 +56,14 @@ impl Component {
         Ok(())
     }
 
-    pub fn key(&self) -> Option<&IfmtInput> {
+    pub fn key(&self) -> Option<&Expr> {
         match self
             .fields
             .iter()
             .find(|f| f.name == "key")
             .map(|f| &f.content)
         {
-            Some(ContentField::Formatted(fmt)) => Some(fmt),
+            Some(ContentField::ManExpr(fmt)) => Some(fmt),
             _ => None,
         }
     }
@@ -236,7 +236,7 @@ impl Parse for ComponentField {
         }
 
         if name == "key" {
-            let content = ContentField::Formatted(input.parse()?);
+            let content = ContentField::ManExpr(input.parse()?);
             return Ok(Self { name, content });
         }
         if input.peek(LitStr) {
