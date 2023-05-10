@@ -341,7 +341,7 @@ class Interpreter {
         this.RemoveAttribute(edit.id, edit.name, edit.ns);
         break;
       case "RemoveEventListener":
-        this.RemoveEventListener(edit.id, edit.name);
+        this.RemoveEventListener(edit.id, edit.name, event_bubbles(edit.name));
         break;
       case "NewEventListener":
         let bubbles = event_bubbles(edit.name);

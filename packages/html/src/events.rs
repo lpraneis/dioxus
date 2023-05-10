@@ -9,12 +9,10 @@ macro_rules! impl_event {
         $(
             $( #[$attr] )*
             #[inline]
-            pub fn $name<'a, E: crate::EventReturn<T>, T>(_cx: &'a ::dioxus_core::ScopeState, mut _f: impl FnMut(::dioxus_core::Event<$data>) -> E + 'a) -> ::dioxus_core::Attribute<'a> {
+            pub fn $name<'a, P>(_cx: &'a ::dioxus_core::ScopeState, mut _f: impl crate::IntoHandler<'a, $data, P>) -> ::dioxus_core::Attribute<'a> {
                 ::dioxus_core::Attribute {
                     name: stringify!($name),
-                    value: _cx.listener(move |e: ::dioxus_core::Event<$data>| {
-                        _f(e).spawn(_cx);
-                    }),
+                    value: _f.into_handler(_cx),
                     namespace: None,
                     mounted_element: Default::default(),
                     volatile: false,
@@ -45,6 +43,7 @@ mod wheel;
 pub use animation::*;
 pub use clipboard::*;
 pub use composition::*;
+use dioxus_core::AttributeValue;
 pub use drag::*;
 pub use focus::*;
 pub use form::*;
@@ -151,6 +150,42 @@ pub fn event_bubbles(evt: &str) -> bool {
 use std::future::Future;
 
 #[doc(hidden)]
+pub trait IntoHandler<'a, E, P>: Sized {
+    fn into_handler(self, cx: &'a ::dioxus_core::ScopeState) -> AttributeValue<'a>;
+}
+
+impl<'a, E> IntoHandler<'a, E, ()>
+    for &'a dioxus_core::prelude::EventHandler<'a, dioxus_core::Event<E>>
+{
+    #[inline]
+    fn into_handler(self, cx: &'a ::dioxus_core::ScopeState) -> AttributeValue<'a> {
+        (move |evt| self.call(evt)).into_handler(cx)
+    }
+}
+
+impl<'a, D: 'static, T, E: crate::EventReturn<T>, F: FnMut(::dioxus_core::Event<D>) -> E + 'a>
+    IntoHandler<'a, D, (T, E)> for F
+{
+    #[inline]
+    fn into_handler(mut self, cx: &'a ::dioxus_core::ScopeState) -> AttributeValue<'a> {
+        cx.listener(move |data| (self)(data).spawn(cx))
+    }
+}
+
+impl<'a, E, P, H> IntoHandler<'a, E, P> for Option<H>
+where
+    H: IntoHandler<'a, E, P> + Copy + 'a,
+{
+    #[inline]
+    fn into_handler(self, cx: &'a ::dioxus_core::ScopeState) -> AttributeValue<'a> {
+        match self {
+            None => AttributeValue::None,
+            Some(p) => p.into_handler(cx),
+        }
+    }
+}
+
+#[doc(hidden)]
 pub trait EventReturn<P>: Sized {
     fn spawn(self, _cx: &dioxus_core::ScopeState) {}
 }
@@ -167,4 +202,29 @@ where
     fn spawn(self, cx: &dioxus_core::ScopeState) {
         cx.spawn(self);
     }
+}
+
+#[test]
+fn handler_type_works() {
+    fn get_scope_state() -> dioxus_core::ScopeState {
+        todo!()
+    }
+
+    fn takes_impl<'a, P>(_: impl IntoHandler<'a, String, P>) {
+        todo!()
+    }
+
+    let cx = get_scope_state();
+
+    let closure = |evt: dioxus_core::Event<String>| {
+        println!("{}", evt.inner());
+    };
+
+    takes_impl(closure);
+
+    let closure = |evt: dioxus_core::Event<String>| async move {
+        println!("{}", evt.inner());
+    };
+
+    takes_impl(closure);
 }

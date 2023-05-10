@@ -125,14 +125,37 @@ impl<'b> VirtualDom {
                     .mounted_element
                     .set(left_attr.mounted_element.get());
 
-                // We want to make sure anything listener that gets pulled is valid
-                if let AttributeValue::Listener(_) = right_attr.value {
-                    self.update_template(left_attr.mounted_element.get(), right_template);
-                }
+                match (&left_attr.value, &right_attr.value) {
+                    (AttributeValue::Listener(_), AttributeValue::Listener(_)) => {
+                        // We want to make sure anything listener that gets pulled is valid
+                        self.update_template(left_attr.mounted_element.get(), right_template);
+                    }
+                    // Add the listener if nessesary
+                    (AttributeValue::None, AttributeValue::Listener(_)) => {
+                        // Safety: we promise not to re-alias this text later on after committing it to the mutation
+                        let unbounded_name: &str = unsafe { std::mem::transmute(right_attr.name) };
 
-                // If the attributes are different (or volatile), we need to update them
-                if left_attr.value != right_attr.value || left_attr.volatile {
-                    self.update_attribute(right_attr, left_attr);
+                        self.mutations.push(Mutation::NewEventListener {
+                            id: right_attr.mounted_element.get(),
+                            name: unbounded_name,
+                        })
+                    }
+                    // Remove the listener if nessesary
+                    (AttributeValue::Listener(_), AttributeValue::None) => {
+                        // Safety: we promise not to re-alias this text later on after committing it to the mutation
+                        let unbounded_name: &str = unsafe { std::mem::transmute(left_attr.name) };
+
+                        self.mutations.push(Mutation::RemoveEventListener {
+                            id: left_attr.mounted_element.get(),
+                            name: unbounded_name,
+                        })
+                    }
+                    (_, _) => {
+                        // If the attributes are different (or volatile), we need to update them
+                        if left_attr.value != right_attr.value || left_attr.volatile {
+                            self.update_attribute(right_attr, left_attr);
+                        }
+                    }
                 }
             });
 
