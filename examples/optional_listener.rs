@@ -37,7 +37,8 @@ fn Component<'a>(cx: Scope<'a, ComponentProps<'a>>) -> Element<'a> {
             "button"
         }
         button {
-            onkeydown: |evt| {
+            // This type cannot be infered anymore, so we have to specify it.
+            onkeydown: |evt: KeyboardEvent| {
                 println!("keydown: {:?}", evt);
                 evt.data.modifiers();
             },
