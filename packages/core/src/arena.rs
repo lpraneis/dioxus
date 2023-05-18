@@ -128,7 +128,7 @@ impl VirtualDom {
                 if let Some(f) = c.scope.get() {
                     self.drop_scope(f, true);
                 }
-                c.props.take();
+                c.props.borrow();
             }
             DynamicNode::Fragment(nodes) => {
                 nodes.iter().for_each(|node| self.drop_scope_inner(node))

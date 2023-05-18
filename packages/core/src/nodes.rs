@@ -8,6 +8,7 @@ use std::{
     cell::{Cell, RefCell, UnsafeCell},
     fmt::{Arguments, Debug},
     future::Future,
+    rc::Rc,
 };
 
 pub type TemplateId = &'static str;
@@ -410,7 +411,7 @@ pub struct VComponent<'a> {
     /// It is possible that components get folded at comppile time, so these shouldn't be really used as a key
     pub render_fn: *const (),
 
-    pub(crate) props: RefCell<Option<Box<dyn AnyProps<'a> + 'a>>>,
+    pub(crate) props: RefCell<Rc<dyn AnyProps<'a> + 'a>>,
 }
 
 impl<'a> std::fmt::Debug for VComponent<'a> {

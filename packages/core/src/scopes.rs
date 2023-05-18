@@ -19,7 +19,7 @@ use std::{
     fmt::{Arguments, Debug},
     future::Future,
     ops::{Index, IndexMut},
-    rc::Rc,
+    rc::{self, Rc},
     sync::Arc,
 };
 
@@ -182,7 +182,7 @@ pub struct ScopeState {
     pub(crate) borrowed_props: RefCell<Vec<*const VComponent<'static>>>,
     pub(crate) attributes_to_drop: RefCell<Vec<*const Attribute<'static>>>,
 
-    pub(crate) props: Option<Box<dyn AnyProps<'static>>>,
+    pub(crate) props: Rc<dyn AnyProps<'static>>,
     pub(crate) placeholder: Cell<Option<ElementId>>,
 }
 
@@ -553,14 +553,14 @@ impl<'src> ScopeState {
         let vcomp = VProps::new(component, P::memoize, props);
 
         // cast off the lifetime of the render return
-        let as_dyn: Box<dyn AnyProps<'src> + '_> = Box::new(vcomp);
-        let extended: Box<dyn AnyProps<'src> + 'src> = unsafe { std::mem::transmute(as_dyn) };
+        let as_dyn: Rc<dyn AnyProps<'src> + '_> = Rc::new(vcomp);
+        let extended: Rc<dyn AnyProps<'src> + 'src> = unsafe { std::mem::transmute(as_dyn) };
 
         DynamicNode::Component(VComponent {
             name: fn_name,
             render_fn: component as *const (),
             static_props: P::IS_STATIC,
-            props: RefCell::new(Some(extended)),
+            props: RefCell::new(extended),
             scope: Cell::new(None),
         })
     }

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{
     any_props::AnyProps,
     arena::ElementId,
@@ -194,6 +196,7 @@ impl<'b> VirtualDom {
         right_template: &'b VNode<'b>,
         idx: usize,
     ) {
+        log::info!("{}", right.name);
         if std::ptr::eq(left, right) {
             return;
         }
@@ -210,18 +213,18 @@ impl<'b> VirtualDom {
 
         // copy out the box for both
         let old = self.scopes[scope_id].props.as_ref();
-        let new: Box<dyn AnyProps> = right.props.take().unwrap();
-        let new: Box<dyn AnyProps> = unsafe { std::mem::transmute(new) };
+        let new: Rc<dyn AnyProps> = right.props.borrow().clone();
+        let new: Rc<dyn AnyProps + 'static> = unsafe { std::mem::transmute(new) };
 
         // If the props are static, then we try to memoize by setting the new with the old
         // The target scopestate still has the reference to the old props, so there's no need to update anything
         // This also implicitly drops the new props since they're not used
-        if left.static_props && unsafe { old.as_ref().unwrap().memoize(new.as_ref()) } {
+        if left.static_props && unsafe { old.memoize(new.as_ref()) } {
             return;
         }
 
         // First, move over the props from the old to the new, dropping old props in the process
-        self.scopes[scope_id].props = Some(new);
+        self.scopes[scope_id].props = new;
 
         // Now run the component and diff it
         self.run_scope(scope_id);
@@ -943,7 +946,7 @@ impl<'b> VirtualDom {
         };
 
         // Restore the props back to the vcomponent in case it gets rendered again
-        let props = self.scopes[scope].props.take();
+        let props = self.scopes[scope].props.clone();
         *comp.props.borrow_mut() = unsafe { std::mem::transmute(props) };
 
         // Now drop all the resouces
