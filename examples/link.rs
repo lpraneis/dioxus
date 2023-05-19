@@ -9,7 +9,7 @@ fn app(cx: Scope) -> Element {
     cx.render(rsx! (
         div {
             p {
-                a { href: "http://dioxuslabs.com/", "Default link - links outside of your app" }
+                a { href: "http://.com/", "Default link - links outside of your app" }
             }
             p {
                 a {
