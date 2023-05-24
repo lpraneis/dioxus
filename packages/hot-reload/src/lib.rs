@@ -10,7 +10,10 @@ use dioxus_rsx::{
     hot_reload::{FileMap, FileMapBuildResult, UpdateResult},
     HotReloadingContext,
 };
-use interprocess::local_socket::{LocalSocketListener, LocalSocketStream};
+use interprocess::{
+    local_socket::{LocalSocketListener, LocalSocketName, LocalSocketStream, ToLocalSocketName},
+    os::unix::udsocket::UdStreamListener,
+};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 pub use dioxus_html::HtmlCtx;
@@ -159,7 +162,13 @@ pub fn init<Ctx: HotReloadingContext + Send + 'static>(cfg: Config<Ctx>) {
         }
         let file_map = Arc::new(Mutex::new(file_map));
 
-        if let Ok(local_socket_stream) = LocalSocketListener::bind("@dioxusin") {
+        let socket_name = "@dioxusin".to_local_socket_name().unwrap();
+        println!("{:?} {}", socket_name.inner(), socket_name.is_path());
+        #[cfg(unix)]
+        let local_socket_stream = UdStreamListener::bind_with_drop_guard("@dioxusin");
+        #[cfg(not(unix))]
+        let local_socket_stream = LocalSocketListener::bind("@dioxusin");
+        if let Ok(local_socket_stream) = local_socket_stream {
             let aborted = Arc::new(Mutex::new(false));
 
             // listen for connections
@@ -347,7 +356,8 @@ fn send_msg(msg: HotReloadMsg, channel: &mut impl Write) -> bool {
 /// Connect to the hot reloading listener. The callback provided will be called every time a template change is detected
 pub fn connect(mut f: impl FnMut(HotReloadMsg) + Send + 'static) {
     std::thread::spawn(move || {
-        if let Ok(socket) = LocalSocketStream::connect("@dioxusin") {
+        let socket = LocalSocketStream::connect("@dioxusin");
+        if let Ok(socket) = socket {
             let mut buf_reader = BufReader::new(socket);
             loop {
                 let mut buf = String::new();

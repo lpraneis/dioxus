@@ -202,7 +202,8 @@ pub fn launch_with_props<P: 'static>(root: Component<P>, props: P, cfg: Config) 
                         }
                     }
                     dioxus_hot_reload::HotReloadMsg::Shutdown => {
-                        *control_flow = ControlFlow::Exit;
+                        // *control_flow = ControlFlow::Exit;
+                        panic!()
                     }
                 },
 

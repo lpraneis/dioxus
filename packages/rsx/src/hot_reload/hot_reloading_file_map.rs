@@ -52,6 +52,7 @@ impl<Ctx: HotReloadingContext> FileMap<Ctx> {
             root: PathBuf,
             filter: &mut impl FnMut(&Path) -> bool,
         ) -> io::Result<FileMapSearchResult> {
+            println!("@{root:?}");
             let mut files = HashMap::new();
             let mut errors = Vec::new();
             if root.is_dir() {

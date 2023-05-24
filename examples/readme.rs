@@ -1,19 +1,18 @@
-//! Example: README.md showcase
-//!
-//! The example from the README.md.
-
-use dioxus::prelude::*;
+use dioxus::prelude::{dioxus_hot_reload::Config, *};
 
 fn main() {
+    hot_reload_init!(Config::new().with_rebuild_command(""));
     dioxus_desktop::launch(app);
 }
 
 fn app(cx: Scope) -> Element {
-    let mut count = use_state(cx, || 0);
-
-    cx.render(rsx! {
-        h1 { "High-Five counter: {count}" }
-        button { onclick: move |_| count += 1, "Up high!" }
-        button { onclick: move |_| count -= 1, "Down low!" }
-    })
+    cx.render(rsx!(div{
+        p{
+            "p1"
+        }
+        // Adding this extra para does nothing
+        p{
+            "p2"
+        }
+    }))
 }
