@@ -38,6 +38,9 @@ impl QueryEngine {
     ) -> Query<V> {
         let request_id = self.active_requests.slab.borrow_mut().insert(());
 
+        // subscribe to the channel before running the query
+        let reciever =  self.sender.subscribe();
+
         // start the query
         // We embed the return of the eval in a function so we can send it back to the main thread
         if let Err(err) = tx.send(format!(
@@ -57,7 +60,7 @@ impl QueryEngine {
         Query {
             slab: self.active_requests.clone(),
             id: request_id,
-            reciever: self.sender.subscribe(),
+            reciever,
             phantom: std::marker::PhantomData,
         }
     }
