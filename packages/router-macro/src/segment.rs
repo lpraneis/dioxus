@@ -1,18 +1,45 @@
+use std::fmt::Display;
+
 use quote::{format_ident, quote};
-use syn::{Ident, Type};
+use syn::{Ident, Path};
 
-use proc_macro2::{Span, TokenStream as TokenStream2};
-
-use crate::query::QuerySegment;
+use proc_macro2::TokenStream as TokenStream2;
 
 #[derive(Debug, Clone)]
 pub enum RouteSegment {
     Static(String),
-    Dynamic(Ident, Type),
-    CatchAll(Ident, Type),
+    Dynamic(Ident, Path),
+    CatchAll(Ident, Path),
+}
+
+impl Display for RouteSegment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RouteSegment::Static(segment) => write!(f, "{}", segment),
+            RouteSegment::Dynamic(ident, ty) => write!(f, "{}: {}", ident, quote! {#ty}),
+            RouteSegment::CatchAll(ident, ty) => write!(f, "...{}: {}", ident, quote! {#ty}),
+        }
+    }
 }
 
 impl RouteSegment {
+    pub fn to_site_map_type(&self) -> TokenStream2 {
+        match self {
+            RouteSegment::Static(segment) => {
+                let segment_as_str = segment.to_string();
+                quote! { dioxus_router::routable::SegmentType::Static(#segment_as_str) }
+            }
+            RouteSegment::Dynamic(ident, _) => {
+                let ident_as_str = ident.to_string();
+                quote! { dioxus_router::routable::SegmentType::Dynamic(#ident_as_str) }
+            }
+            RouteSegment::CatchAll(ident, _) => {
+                let ident_as_str = ident.to_string();
+                quote! { dioxus_router::routable::SegmentType::CatchAll(#ident_as_str) }
+            }
+        }
+    }
+
     pub fn name(&self) -> Option<Ident> {
         match self {
             Self::Static(_) => None,
@@ -120,110 +147,4 @@ impl RouteSegment {
 
 pub fn static_segment_idx(idx: usize) -> Ident {
     format_ident!("StaticSegment{}ParseError", idx)
-}
-
-pub fn parse_route_segments<'a>(
-    route_span: Span,
-    mut fields: impl Iterator<Item = &'a syn::Field>,
-    route: &str,
-) -> syn::Result<(Vec<RouteSegment>, Option<QuerySegment>)> {
-    let mut route_segments = Vec::new();
-
-    let (route_string, query) = match route.rsplit_once('?') {
-        Some((route, query)) => (route, Some(query)),
-        None => (route, None),
-    };
-    let mut iterator = route_string.split('/');
-
-    // skip the first empty segment
-    let first = iterator.next();
-    if first != Some("") {
-        return Err(syn::Error::new(
-            route_span,
-            format!(
-                "Routes should start with /. Error found in the route '{}'",
-                route
-            ),
-        ));
-    }
-
-    while let Some(segment) = iterator.next() {
-        if let Some(segment) = segment.strip_prefix(':') {
-            let spread = segment.starts_with("...");
-
-            let ident = if spread {
-                segment[3..].to_string()
-            } else {
-                segment.to_string()
-            };
-
-            let field = fields.find(|field| match field.ident {
-                Some(ref field_ident) => *field_ident == ident,
-                None => false,
-            });
-
-            let ty = if let Some(field) = field {
-                field.ty.clone()
-            } else {
-                return Err(syn::Error::new(
-                    route_span,
-                    format!("Could not find a field with the name '{}'", ident,),
-                ));
-            };
-            if spread {
-                route_segments.push(RouteSegment::CatchAll(
-                    Ident::new(&ident, Span::call_site()),
-                    ty,
-                ));
-
-                if iterator.next().is_some() {
-                    return Err(syn::Error::new(
-                        route_span,
-                        "Catch-all route segments must be the last segment in a route. The route segments after the catch-all segment will never be matched.",
-                    ));
-                } else {
-                    break;
-                }
-            } else {
-                route_segments.push(RouteSegment::Dynamic(
-                    Ident::new(&ident, Span::call_site()),
-                    ty,
-                ));
-            }
-        } else {
-            route_segments.push(RouteSegment::Static(segment.to_string()));
-        }
-    }
-
-    // check if the route has a query string
-    let parsed_query = match query {
-        Some(query) => {
-            if let Some(query) = query.strip_prefix(':') {
-                let query_ident = Ident::new(query, Span::call_site());
-                let field = fields.find(|field| match field.ident {
-                    Some(ref field_ident) => field_ident == &query_ident,
-                    None => false,
-                });
-
-                let ty = if let Some(field) = field {
-                    field.ty.clone()
-                } else {
-                    return Err(syn::Error::new(
-                        route_span,
-                        format!("Could not find a field with the name '{}'", query_ident),
-                    ));
-                };
-
-                Some(QuerySegment {
-                    ident: query_ident,
-                    ty,
-                })
-            } else {
-                None
-            }
-        }
-        None => None,
-    };
-
-    Ok((route_segments, parsed_query))
 }

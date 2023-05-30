@@ -42,10 +42,7 @@ impl<'a> RouteTree<'a> {
                 RouteTreeSegmentData::Nest { .. } => 1,
                 RouteTreeSegmentData::Route(route) => {
                     // Routes that end in a catch all segment should be checked last
-                    match route.segments.last() {
-                        Some(RouteSegment::CatchAll(..)) => 2,
-                        _ => 1,
-                    }
+                    1
                 }
             }
         });
@@ -182,56 +179,6 @@ impl<'a> RouteTree<'a> {
                 // Update the current route
                 current_route = segments.last().cloned();
             }
-
-            match route.next_static_segment() {
-                // If there is a static segment, check if it already exists in the tree
-                Some((i, segment)) => {
-                    let current_children = current_route
-                        .map(|id| self.children(id))
-                        .unwrap_or_else(|| segments.clone());
-                    let found = current_children.iter().find_map(|&id| {
-                        let seg = self.get(id).unwrap();
-                        match seg {
-                            RouteTreeSegmentData::Static { segment: s, .. } => {
-                                (s == &segment).then_some(id)
-                            }
-                            _ => None,
-                        }
-                    });
-
-                    match found {
-                        Some(id) => {
-                            // If it exists, add the route to the children of the segment
-                            let new_children = self.construct(vec![route]);
-                            self.children_mut(id).extend(new_children.into_iter());
-                        }
-                        None => {
-                            // If it doesn't exist, add the route as a new segment
-                            let data = RouteTreeSegmentData::Static {
-                                segment,
-                                error_variant: route.error_variant(),
-                                children: self.construct(vec![route]),
-                                index: i,
-                            };
-                            let id = self.entries.insert(data);
-                            let current_children_mut = current_route
-                                .map(|id| self.children_mut(id))
-                                .unwrap_or_else(|| &mut segments);
-                            current_children_mut.push(id);
-                        }
-                    }
-                }
-                // If there is no static segment, add the route to the current_route
-                None => {
-                    let id = self
-                        .entries
-                        .insert(RouteTreeSegmentData::Route(route.route));
-                    let current_children_mut = current_route
-                        .map(|id| self.children_mut(id))
-                        .unwrap_or_else(|| &mut segments);
-                    current_children_mut.push(id);
-                }
-            }
         }
 
         segments
@@ -302,38 +249,13 @@ impl<'a> RouteTreeSegmentData<'a> {
             }
             RouteTreeSegmentData::Route(route) => {
                 // At this point, we have matched all static segments, so we can just check if the remaining segments match the route
-                let varient_parse_error = route.error_ident();
                 let enum_varient = &route.route_name;
 
-                let route_segments = route
-                    .segments
-                    .iter()
-                    .enumerate()
-                    .skip_while(|(_, seg)| matches!(seg, RouteSegment::Static(_)));
-
                 let construct_variant = route.construct(nests, enum_name);
-                let parse_query = route.parse_query();
 
-                let insure_not_trailing = route
-                    .segments
-                    .last()
-                    .map(|seg| !matches!(seg, RouteSegment::CatchAll(_, _)))
-                    .unwrap_or(true);
-
-                print_route_segment(
-                    route_segments.peekable(),
-                    return_constructed(
-                        insure_not_trailing,
-                        construct_variant,
-                        &error_enum_name,
-                        enum_varient,
-                        &varient_parse_error,
-                        parse_query,
-                    ),
-                    &error_enum_name,
-                    enum_varient,
-                    &varient_parse_error,
-                )
+                quote! {
+                    return Ok(#construct_variant);
+                }
             }
             Self::Nest { nest, children } => {
                 // At this point, we have matched all static segments, so we can just check if the remaining segments match the route
@@ -396,45 +318,6 @@ fn print_route_segment<'a, I: Iterator<Item = (usize, &'a RouteSegment)>>(
     }
 }
 
-fn return_constructed(
-    insure_not_trailing: bool,
-    construct_variant: TokenStream,
-    error_enum_name: &Ident,
-    enum_varient: &Ident,
-    varient_parse_error: &Ident,
-    parse_query: TokenStream,
-) -> TokenStream {
-    if insure_not_trailing {
-        quote! {
-            let remaining_segments = segments.clone();
-            let mut segments_clone = segments.clone();
-            let next_segment = segments_clone.next();
-            let segment_after_next = segments_clone.next();
-            match (next_segment, segment_after_next) {
-                // This is the last segment, return the parsed route
-                (None, _) | (Some(""), None) => {
-                    #parse_query
-                    return Ok(#construct_variant);
-                }
-                _ => {
-                    let mut trailing = String::new();
-                    for seg in remaining_segments {
-                        trailing += seg;
-                        trailing += "/";
-                    }
-                    trailing.pop();
-                    errors.push(#error_enum_name::#enum_varient(#varient_parse_error::ExtraSegments(trailing)))
-                }
-            }
-        }
-    } else {
-        quote! {
-            #parse_query
-            return Ok(#construct_variant);
-        }
-    }
-}
-
 pub struct RouteIter<'a> {
     route: &'a Route,
     nests: &'a [Nest],
@@ -459,23 +342,27 @@ impl<'a> RouteIter<'a> {
         self.nest_index += 1;
         Some(nest)
     }
-
-    fn next_static_segment(&mut self) -> Option<(usize, &'a str)> {
-        let idx = self.static_segment_index;
-        let segment = self.route.segments.get(idx)?;
-        match segment {
-            RouteSegment::Static(segment) => {
-                self.static_segment_index += 1;
-                Some((idx, segment))
-            }
-            _ => None,
-        }
-    }
-
-    fn error_variant(&self) -> StaticErrorVariant {
-        StaticErrorVariant {
-            varient_parse_error: self.route.error_ident(),
-            enum_varient: self.route.route_name.clone(),
-        }
-    }
 }
+
+// quote! {
+//     let remaining_segments = segments.clone();
+//     let mut segments_clone = segments.clone();
+//     let next_segment = segments_clone.next();
+//     let segment_after_next = segments_clone.next();
+//     match (next_segment, segment_after_next) {
+//         // This is the last segment, return the parsed route
+//         (None, _) | (Some(""), None) => {
+//             #parse_query
+//             return Ok(#construct_variant);
+//         }
+//         _ => {
+//             let mut trailing = String::new();
+//             for seg in remaining_segments {
+//                 trailing += seg;
+//                 trailing += "/";
+//             }
+//             trailing.pop();
+//             errors.push(#error_enum_name::#enum_varient(#varient_parse_error::ExtraSegments(trailing)))
+//         }
+//     }
+// }

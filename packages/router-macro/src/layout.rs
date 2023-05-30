@@ -1,32 +1,21 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
-use syn::Ident;
-
-use crate::nest::{Nest, NestId};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LayoutId(pub usize);
+use syn::{braced, parenthesized, parse::Parse, parse_quote, Path, Token};
 
 #[derive(Debug)]
-pub struct Layout {
-    pub comp: Ident,
-    pub props_name: Ident,
-    pub active_nests: Vec<NestId>,
+pub(crate) struct Layout {
+    pub opt_out: bool,
+    pub component: Path,
+    pub children: Vec<crate::RouteType>,
 }
 
 impl Layout {
-    pub fn routable_match(&self, nests: &[Nest]) -> TokenStream {
-        let props_name = &self.props_name;
-        let comp_name = &self.comp;
-        let dynamic_segments = self
-            .active_nests
-            .iter()
-            .flat_map(|id| nests[id.0].dynamic_segments());
+    pub fn routable_match(&self) -> TokenStream {
+        let comp_name = &self.component;
 
         quote! {
-            let comp = #props_name { #(#dynamic_segments,)* };
             let cx = cx.bump().alloc(Scoped {
-                props: cx.bump().alloc(comp),
+                props: cx.bump().alloc(props),
                 scope: cx,
             });
             #comp_name(cx)
@@ -34,22 +23,24 @@ impl Layout {
     }
 }
 
-impl Layout {
-    pub fn parse(input: syn::parse::ParseStream, active_nests: Vec<NestId>) -> syn::Result<Self> {
-        // Then parse the component name
-        let _ = input.parse::<syn::Token![,]>();
-        let comp: Ident = input.parse()?;
+impl Parse for Layout {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let inner;
+        parenthesized!(inner in input);
+        let component: Path = inner.parse()?;
+        let _ = inner.parse::<Token![,]>();
 
-        // Then parse the props name
-        let _ = input.parse::<syn::Token![,]>();
-        let props_name: Ident = input
-            .parse()
-            .unwrap_or_else(|_| format_ident!("{}Props", comp.to_string()));
+        let content;
+        braced!(content in input);
+        let mut children = Vec::new();
+        while !content.is_empty() {
+            children.push(content.parse()?);
+        }
 
         Ok(Self {
-            comp,
-            props_name,
-            active_nests,
+            opt_out: false,
+            component,
+            children,
         })
     }
 }
