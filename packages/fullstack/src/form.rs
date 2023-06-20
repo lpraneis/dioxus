@@ -79,8 +79,7 @@ impl<F: ServerFn + DeserializeOwned + Clone> Action for F {
                     .await;
 
                 match response {
-                    Ok(res) =>
-                    {
+                    Ok(res) => {
                         #[cfg(feature = "router")]
                         if let Some(router) = router {
                             log::info!("response: {:#?}, {:?}", res, res.url());
@@ -90,6 +89,7 @@ impl<F: ServerFn + DeserializeOwned + Clone> Action for F {
                             let current_url = &router.current_location().url;
                             router.navigate_to(new_url.as_str());
                         }
+                        res.bytes().await;
                     }
                     Err(err) => {
                         log::error!("Failed to submit form: {}", err);
