@@ -26,17 +26,46 @@ fn main() {
 }
 
 fn app(cx: Scope) -> Element {
+    let children_count = use_state(cx, || 0);
+
+    render! {
+        button {
+            onclick: move |_| {
+                children_count.set(*children_count.get() + 1);
+            },
+            "Add child"
+        }
+        div {
+            position: "relative",
+            (0..**children_count).map(|_| {
+                rsx!{
+                    Child {}
+                }
+            })
+        }
+    }
+}
+
+fn Child(cx: Scope) -> Element {
     let div_element: &UseRef<Option<Rc<MountedData>>> = use_ref(cx, || None);
 
     let dimentions = use_ref(cx, Rect::zero);
 
     cx.render(rsx!(
         div {
-            width: "50%",
-            height: "50%",
+            position: "absolute",
+            top: "10",
+            left: "200",
             background_color: "red",
             onmounted: move |cx| {
-                div_element.set(Some(cx.inner().clone()));
+                to_owned![div_element, dimentions];
+                async move {
+                    let client_rect = cx.inner().get_client_rect();
+                    if let Ok(rect) = client_rect.await {
+                        dimentions.set(rect);
+                    }
+                    div_element.set(Some(cx.inner().clone()));
+                }
             },
             "This element is {dimentions.read():?}"
         }

@@ -33,7 +33,19 @@ impl RenderedElementBacking for DesktopElement {
             >,
         >,
     > {
-        let script = format!("return window.interpreter.GetClientRect({});", self.id.0);
+        let script = format!(
+            r#"
+        function waitForRenders() {{
+            return new Promise(resolve => {{
+                setTimeout(() => {{
+                    resolve();
+                }}, 0);
+            }});
+        }}
+        await waitForRenders();
+        return window.interpreter.GetClientRect({});"#,
+            self.id.0
+        );
 
         let fut = self
             .query

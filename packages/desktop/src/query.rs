@@ -38,15 +38,15 @@ impl QueryEngine {
         // start the query
         // We embed the return of the eval in a function so we can send it back to the main thread
         if let Err(err) = webview.evaluate_script(&format!(
-            r#"window.ipc.postMessage(
+            r#"((async function(){{{script}}})()).then(data => window.ipc.postMessage(
                 JSON.stringify({{
                     "method":"query",
                     "params": {{
                         "id": {request_id},
-                        "data": (function(){{{script}}})()
+                        "data": data
                     }}
                 }})
-            );"#
+            ));"#
         )) {
             log::warn!("Query error: {err}");
         }
