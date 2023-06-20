@@ -1,6 +1,10 @@
-use std::{any::Any, cell::RefCell, sync::Arc};
+use std::{
+    any::Any,
+    cell::RefCell,
+    sync::{Arc, RwLock},
+};
 
-use dioxus_core::ScopeId;
+use dioxus_core::{ScopeId, ScopeState};
 use slab::Slab;
 
 thread_local! {
@@ -11,7 +15,7 @@ thread_local! {
 /// Provide the runtime for signals
 ///
 /// This will reuse dead runtimes
-pub fn claim_rt(update_any: Arc<dyn Fn(ScopeId)>) -> &'static SignalRt {
+pub fn claim_rt(scope: &ScopeState) -> &'static SignalRt {
     RUNTIMES.with(|runtimes| {
         if let Some(rt) = runtimes.borrow_mut().pop() {
             return rt;
@@ -19,7 +23,8 @@ pub fn claim_rt(update_any: Arc<dyn Fn(ScopeId)>) -> &'static SignalRt {
 
         Box::leak(Box::new(SignalRt {
             signals: RefCell::new(Slab::new()),
-            update_any,
+            update_any: scope.schedule_update_any(),
+            scope_stack: scope.scope_stack(),
         }))
     })
 }
@@ -34,6 +39,7 @@ pub fn reclam_rt(_rt: &'static SignalRt) {
 pub struct SignalRt {
     pub(crate) signals: RefCell<Slab<Inner>>,
     pub(crate) update_any: Arc<dyn Fn(ScopeId)>,
+    pub(crate) scope_stack: Arc<RwLock<Vec<ScopeId>>>,
 }
 
 impl SignalRt {
@@ -50,11 +56,7 @@ impl SignalRt {
     }
 
     pub fn get<T: Clone + 'static>(&self, id: usize) -> T {
-        self.signals.borrow()[id]
-            .value
-            .downcast_ref::<T>()
-            .cloned()
-            .unwrap()
+        self.read::<T>(id).clone()
     }
 
     pub fn set<T: 'static>(&self, id: usize, value: T) {
@@ -72,13 +74,22 @@ impl SignalRt {
     }
 
     pub fn with<T: 'static, O>(&self, id: usize, f: impl FnOnce(&T) -> O) -> O {
-        let signals = self.signals.borrow();
-        let inner = &signals[id];
-        let inner = inner.value.downcast_ref::<T>().unwrap();
-        f(inner)
+        let inner = self.read::<T>(id);
+        f(&*inner)
+    }
+
+    fn subscribe_to_current_scope(&self, id: usize) {
+        let current_scope = {
+            let stack = self.scope_stack.read().unwrap();
+            stack.last().cloned()
+        };
+        if let Some(current_scope) = current_scope {
+            self.subscribe(id, current_scope);
+        }
     }
 
     pub(crate) fn read<T: 'static>(&self, id: usize) -> std::cell::Ref<T> {
+        self.subscribe_to_current_scope(id);
         let signals = self.signals.borrow();
         std::cell::Ref::map(signals, |signals| {
             signals[id].value.downcast_ref::<T>().unwrap()

@@ -20,7 +20,7 @@ use std::{
     future::Future,
     ops::{Index, IndexMut},
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 /// A wrapper around the [`Scoped`] object that contains a reference to the [`ScopeState`] and properties for a given
@@ -184,9 +184,16 @@ pub struct ScopeState {
 
     pub(crate) props: Option<Box<dyn AnyProps<'static>>>,
     pub(crate) placeholder: Cell<Option<ElementId>>,
+
+    pub(crate) scope_stack: Arc<RwLock<Vec<ScopeId>>>,
 }
 
 impl<'src> ScopeState {
+    ///
+    pub fn scope_stack(&self) -> Arc<RwLock<Vec<ScopeId>>> {
+        self.scope_stack.clone()
+    }
+
     pub(crate) fn current_frame(&self) -> &BumpFrame {
         match self.render_cnt.get() % 2 {
             0 => &self.node_arena_1,

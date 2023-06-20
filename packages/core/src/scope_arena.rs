@@ -44,6 +44,7 @@ impl VirtualDom {
             shared_contexts: Default::default(),
             borrowed_props: Default::default(),
             attributes_to_drop: Default::default(),
+            scope_stack: self.component_stack.clone(),
         })
     }
 
@@ -70,7 +71,12 @@ impl VirtualDom {
             let props: &dyn AnyProps = scope.props.as_ref().unwrap().as_ref();
             let props: &dyn AnyProps = mem::transmute(props);
 
-            props.render(scope).extend_lifetime()
+            {
+                self.component_stack.write().unwrap().push(scope_id);
+                let nodes = props.render(scope).extend_lifetime();
+                self.component_stack.write().unwrap().pop();
+                nodes
+            }
         };
 
         // immediately resolve futures that can be resolved

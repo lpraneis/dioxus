@@ -12,7 +12,7 @@ pub use rt::*;
 
 pub fn use_init_signal_rt(cx: &ScopeState) {
     cx.use_hook(|| {
-        let rt = crate::rt::claim_rt(cx.schedule_update_any());
+        let rt = crate::rt::claim_rt(cx);
         cx.provide_context(rt);
     });
 }
@@ -21,7 +21,6 @@ pub fn use_signal<T: 'static>(cx: &ScopeState, f: impl FnOnce() -> T) -> Signal<
     cx.use_hook(|| {
         let rt: &'static SignalRt = cx.consume_context().unwrap();
         let id = rt.init(f());
-        rt.subscribe(id, cx.scope_id());
 
         struct SignalHook<T> {
             signal: Signal<T>,
@@ -55,7 +54,7 @@ impl<T: 'static> Signal<T> {
         self.rt.read(self.id)
     }
 
-    pub fn write(&self) -> RefMut<T> {
+    fn write(&self) -> RefMut<T> {
         self.rt.write(self.id)
     }
 
@@ -68,9 +67,14 @@ impl<T: 'static> Signal<T> {
         f(&*write)
     }
 
-    pub fn update<O>(&self, _f: impl FnOnce(&mut T) -> O) -> O {
+    pub fn update<O>(&self, f: impl FnOnce(&mut T) -> O) -> O {
         let mut write = self.write();
-        _f(&mut *write)
+        f(&mut *write)
+    }
+
+    pub fn modify(&self, f: impl Fn(&mut T)) {
+        let mut write = self.write();
+        f(&mut *write)
     }
 }
 

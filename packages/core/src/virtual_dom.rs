@@ -16,7 +16,15 @@ use crate::{
 use futures_util::{pin_mut, StreamExt};
 use rustc_hash::FxHashMap;
 use slab::Slab;
-use std::{any::Any, borrow::BorrowMut, cell::Cell, collections::BTreeSet, future::Future, rc::Rc};
+use std::{
+    any::Any,
+    borrow::BorrowMut,
+    cell::Cell,
+    collections::BTreeSet,
+    future::Future,
+    rc::Rc,
+    sync::{Arc, RwLock},
+};
 
 /// A virtual node system that progresses user events and diffs UI trees.
 ///
@@ -185,8 +193,10 @@ pub struct VirtualDom {
     pub(crate) elements: Slab<ElementRef>,
 
     // While diffing we need some sort of way of breaking off a stream of suspended mutations.
-    pub(crate) scope_stack: Vec<ScopeId>,
     pub(crate) collected_leaves: Vec<SuspenseId>,
+    pub(crate) scope_stack: Vec<ScopeId>,
+
+    pub(crate) component_stack: Arc<RwLock<Vec<ScopeId>>>,
 
     // Whenever a suspense tree is finished, we push its boundary onto this stack.
     // When "render_with_deadline" is called, we pop the stack and return the mutations
@@ -260,7 +270,8 @@ impl VirtualDom {
             templates: Default::default(),
             scopes: Default::default(),
             elements: Default::default(),
-            scope_stack: Vec::new(),
+            scope_stack: Default::default(),
+            component_stack: Default::default(),
             dirty_scopes: BTreeSet::new(),
             collected_leaves: Vec::new(),
             finished_fibers: Vec::new(),
