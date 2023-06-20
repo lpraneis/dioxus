@@ -57,14 +57,14 @@
 
 use axum::{
     body::{self, Body, BoxBody, Full},
-    extract::{State, WebSocketUpgrade},
+    extract::State,
     handler::Handler,
     http::{Request, Response, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Router,
 };
-use dioxus_core::VirtualDom;
+use dioxus::prelude::VirtualDom;
 use server_fn::{Encoding, Payload, ServerFunctionRegistry};
 use std::error::Error;
 use std::sync::Arc;
@@ -331,7 +331,7 @@ where
                 Router::new()
                     .route(
                         "/disconnect",
-                        get(|ws: WebSocketUpgrade| async {
+                        get(|ws: axum::extract::WebSocketUpgrade| async {
                             ws.on_upgrade(|mut ws| async move {
                                 use axum::extract::ws::Message;
                                 let _ = ws.send(Message::Text("connected".into())).await;
@@ -401,8 +401,6 @@ pub async fn server_fn_handler(
                                 .get("Accept")
                                 .and_then(|value| value.to_str().ok());
                             let mut res = Response::builder();
-                            *res.headers_mut().expect("empty response should be valid") =
-                                server_context.take_response_headers();
                             if accept_header == Some("application/json")
                                 || accept_header
                                     == Some(
@@ -412,6 +410,26 @@ pub async fn server_fn_handler(
                                 || accept_header == Some("application/cbor")
                             {
                                 res = res.status(StatusCode::OK);
+                            } else {
+                                res = res.status(StatusCode::SEE_OTHER).header(
+                                    "Location",
+                                    parts
+                                        .headers
+                                        .get("Referer")
+                                        .and_then(|value| value.to_str().ok())
+                                        .unwrap_or("/"),
+                                );
+                            }
+                            let headers =
+                                res.headers_mut().expect("empty response should be valid");
+                            for header in server_context.take_response_headers() {
+                                if let Some(name) = header.0 {
+                                    headers.append(name, header.1);
+                                }
+                            }
+
+                            if let Some(status) = server_context.get_status() {
+                                res = res.status(status);
                             }
 
                             let resp = match serialized {
@@ -435,7 +453,9 @@ pub async fn server_fn_handler(
                         Err(e) => report_err(e),
                     };
 
-                    resp_tx.send(resp).unwrap();
+                    if let Err(err) = resp_tx.send(resp) {
+                        log::error!("Error sending response: {:?}", err);
+                    }
                 })
         }
     });
@@ -451,7 +471,7 @@ fn report_err<E: Error>(e: E) -> Response<BoxBody> {
 
 /// A handler for Dioxus web hot reload websocket. This will send the updated static parts of the RSX to the client when they change.
 #[cfg(all(debug_assertions, feature = "hot-reload", feature = "ssr"))]
-pub async fn hot_reload_handler(ws: WebSocketUpgrade) -> impl IntoResponse {
+pub async fn hot_reload_handler(ws: axum::extract::WebSocketUpgrade) -> impl IntoResponse {
     use axum::extract::ws::Message;
     use futures_util::StreamExt;
 

@@ -6,6 +6,7 @@
 //! ```
 
 #![allow(non_snake_case)]
+
 use dioxus::prelude::*;
 use dioxus_fullstack::prelude::*;
 use dioxus_router::*;
@@ -13,11 +14,15 @@ use serde::{Deserialize, Serialize};
 
 fn main() {
     #[cfg(feature = "web")]
-    dioxus_web::launch_with_props(
-        App,
-        AppProps { route: None },
-        dioxus_web::Config::new().hydrate(true),
-    );
+    {
+        wasm_logger::init(wasm_logger::Config::default());
+
+        dioxus_web::launch_with_props(
+            App,
+            AppProps { route: None },
+            dioxus_web::Config::new().hydrate(true),
+        );
+    }
     #[cfg(feature = "ssr")]
     {
         // Start hot reloading
@@ -34,8 +39,11 @@ fn main() {
         }));
 
         use axum::extract::State;
-        PostServerData::register().unwrap();
-        GetServerData::register().unwrap();
+
+        SubOneServer::register().unwrap();
+        AddOneServer::register().unwrap();
+        GetCountServer::register().unwrap();
+
         tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(async move {
@@ -110,67 +118,86 @@ fn App(cx: Scope<AppProps>) -> Element {
 }
 
 fn Counter(cx: Scope) -> Element {
-    let mut count = use_state(cx, || 0);
-    let text = use_state(cx, || "...".to_string());
+    let count = {
+        #[cfg(feature = "ssr")]
+        {
+            count()
+        }
+        #[cfg(not(feature = "ssr"))]
+        {
+            use_future!(cx, |()| async { get_count().await.unwrap() })
+        }
+    };
 
     cx.render(rsx! {
-        Link {
-            to: "/blog",
-            "Go to blog"
-        }
-        form {
-            action: PostServerData::url(),
-            method: "get",
-            ul {
-                li {
-                    label{
-                        r#for: "name",
-                        "Name:"
-                    }
-                    input {
-                        r#type: "text",
-                        id: "name",
-                        name: "data",
-                    }
-                }
-                li {
-                    button {
-                        r#type: "submit",
-                        "Send your message"
-                    }
-                }
+        {
+            #[cfg(not(feature = "ssr"))]
+            let count = count.value()
+                .cloned()
+                .unwrap_or_default();
+            rsx! {
+                h1 { "High-Five counter: {count}" }
             }
         }
-        div{
-            h1 { "High-Five counter: {count}" }
-            button { onclick: move |_| count += 1, "Up high!" }
-            button { onclick: move |_| count -= 1, "Down low!" }
+        Form::<AddOneServer> {
+            onsubmit: move |_| {
+                #[cfg(not(feature = "ssr"))]
+                count.restart();
+            },
             button {
-                onclick: move |_| {
-                    to_owned![text];
-                    async move {
-                        if let Ok(data) = get_server_data().await {
-                            println!("Client received: {}", data);
-                            text.set(data.clone());
-                            post_server_data(data).await.unwrap();
-                        }
-                    }
-                },
-                "Run a server function"
+                r#type: "submit",
+                "Up high!"
             }
-            "Server said: {text}"
+        }
+        Form::<SubOneServer> {
+            onsubmit: move |_| {
+                #[cfg(not(feature = "ssr"))]
+                count.restart();
+            },
+            button {
+                r#type: "submit",
+                "Down low!"
+            }
         }
     })
 }
 
-#[server(PostServerData, "/", "Url")]
-async fn post_server_data(data: String) -> Result<(), ServerFnError> {
-    println!("Server received: {}", data);
+#[cfg(feature = "ssr")]
+use server::*;
+#[cfg(feature = "ssr")]
+mod server {
+    use std::sync::atomic::{AtomicIsize, Ordering};
+
+    static COUNT: AtomicIsize = AtomicIsize::new(0);
+
+    pub(crate) fn add() {
+        COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn sub() {
+        COUNT.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    pub(crate) fn count() -> isize {
+        COUNT.load(Ordering::SeqCst)
+    }
+}
+
+#[server(AddOneServer, "", "Url")]
+async fn add_one() -> Result<(), ServerFnError> {
+    add();
 
     Ok(())
 }
 
-#[server(GetServerData)]
-async fn get_server_data() -> Result<String, ServerFnError> {
-    Ok("Hello from the server!".to_string())
+#[server(SubOneServer, "", "Url")]
+async fn sub_one() -> Result<(), ServerFnError> {
+    sub();
+
+    Ok(())
+}
+
+#[server(GetCountServer)]
+async fn get_count() -> Result<isize, ServerFnError> {
+    Ok(count())
 }

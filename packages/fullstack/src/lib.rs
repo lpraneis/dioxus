@@ -5,11 +5,11 @@
 
 pub use adapters::*;
 
-mod props_html;
-
 mod adapters;
+mod form;
 #[cfg(all(debug_assertions, feature = "hot-reload", feature = "ssr"))]
 mod hot_reload;
+mod props_html;
 #[cfg(feature = "ssr")]
 mod render;
 #[cfg(feature = "ssr")]
@@ -25,6 +25,7 @@ pub mod prelude {
     pub use crate::adapters::salvo_adapter::*;
     #[cfg(feature = "warp")]
     pub use crate::adapters::warp_adapter::*;
+    pub use crate::form::*;
     #[cfg(not(feature = "ssr"))]
     pub use crate::props_html::deserialize_props::get_root_props_from_document;
     #[cfg(feature = "ssr")]

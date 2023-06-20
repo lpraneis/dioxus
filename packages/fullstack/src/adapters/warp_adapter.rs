@@ -51,7 +51,7 @@ use crate::{
     prelude::*, render::SSRState, serve_config::ServeConfig, server_fn::DioxusServerFnRegistry,
 };
 
-use dioxus_core::VirtualDom;
+use dioxus::prelude::VirtualDom;
 use server_fn::{Encoding, Payload, ServerFunctionRegistry};
 use std::error::Error;
 use std::sync::Arc;
@@ -288,9 +288,6 @@ pub async fn server_fn_handler(
                                 .and_then(|value| value.to_str().ok());
                             let mut res = Response::builder();
 
-                            *res.headers_mut().expect("empty request should be valid") =
-                                server_context.take_response_headers();
-
                             if accept_header == Some("application/json")
                                 || accept_header
                                     == Some(
@@ -300,6 +297,25 @@ pub async fn server_fn_handler(
                                 || accept_header == Some("application/cbor")
                             {
                                 res = res.status(StatusCode::OK);
+                            } else {
+                                res = res.status(StatusCode::SEE_OTHER).header(
+                                    "Location",
+                                    headers
+                                        .get("Referer")
+                                        .and_then(|value| value.to_str().ok())
+                                        .unwrap_or("/"),
+                                );
+                            }
+
+                            let headers =
+                                res.headers_mut().expect("empty response should be valid");
+                            for header in server_context.take_response_headers() {
+                                if let Some(name) = header.0 {
+                                    headers.append(name, header.1);
+                                }
+                            }
+                            if let Some(status) = server_context.get_status() {
+                                res = res.status();
                             }
 
                             let resp = match serialized {

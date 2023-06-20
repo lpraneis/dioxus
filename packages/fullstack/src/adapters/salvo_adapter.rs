@@ -50,7 +50,7 @@
 //! }
 //! ```
 
-use dioxus_core::VirtualDom;
+use dioxus::prelude::VirtualDom;
 use hyper::{http::HeaderValue, StatusCode};
 use salvo::{
     async_trait, handler,
@@ -407,9 +407,6 @@ impl ServerFnHandler {
         });
         let result = resp_rx.await.unwrap();
 
-        // Set the headers from the server context
-        *res.headers_mut() = server_context.take_response_headers();
-
         match result {
             Ok(serialized) => {
                 // if this is Accept: application/json then send a serialized JSON response
@@ -423,6 +420,29 @@ impl ServerFnHandler {
                     || accept_header == Some("application/cbor")
                 {
                     res.set_status_code(StatusCode::OK);
+                } else {
+                    res.headers_mut().insert(
+                        "Location",
+                        HeaderValue::from_static(
+                            headers
+                                .get("Referer")
+                                .and_then(|value| value.to_str().ok())
+                                .unwrap_or("/"),
+                        )
+                        .unwrap(),
+                    );
+                    res.set_status_code(StatusCode::SEE_OTHER);
+                }
+
+                // Set the headers from the server context
+                let headers = res.headers_mut();
+                for header in server_context.take_response_headers() {
+                    if let Some(name) = header.0 {
+                        headers.append(name, header.1);
+                    }
+                }
+                if let Some(status) = server_context.get_status() {
+                    res.set_status_code(status);
                 }
 
                 match serialized {

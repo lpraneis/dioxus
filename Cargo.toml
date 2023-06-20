@@ -26,6 +26,7 @@ members = [
     "packages/fullstack/server-macro",
     "packages/fullstack/examples/axum-hello-world",
     "packages/fullstack/examples/axum-router",
+    "packages/fullstack/examples/axum-progressive-counter",
     "packages/fullstack/examples/axum-desktop",
     "packages/fullstack/examples/salvo-hello-world",
     "packages/fullstack/examples/warp-hello-world",

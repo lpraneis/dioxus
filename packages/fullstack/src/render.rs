@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use dioxus_core::VirtualDom;
+use dioxus::prelude::VirtualDom;
 use dioxus_ssr::Renderer;
 
 use crate::prelude::ServeConfig;

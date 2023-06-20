@@ -1,4 +1,4 @@
-use dioxus_core::ScopeState;
+use dioxus::prelude::*;
 
 /// A trait for an object that contains a server context
 pub trait HasServerContext {
@@ -37,6 +37,8 @@ pub struct DioxusServerContext {
     #[cfg(feature = "ssr")]
     headers: std::sync::Arc<std::sync::RwLock<hyper::header::HeaderMap>>,
     #[cfg(feature = "ssr")]
+    status: std::sync::Arc<std::sync::RwLock<Option<hyper::StatusCode>>>,
+    #[cfg(feature = "ssr")]
     pub(crate) parts: std::sync::Arc<RequestParts>,
 }
 
@@ -50,6 +52,8 @@ impl Default for DioxusServerContext {
             headers: Default::default(),
             #[cfg(feature = "ssr")]
             parts: Default::default(),
+            #[cfg(feature = "ssr")]
+            status: Default::default(),
         }
     }
 }
@@ -73,6 +77,7 @@ mod server_fn_impl {
                 parts: parts.into(),
                 shared_context: Arc::new(RwLock::new(SendSyncAnyMap::new())),
                 headers: Default::default(),
+                status: Default::default(),
             }
         }
 
@@ -128,6 +133,25 @@ mod server_fn_impl {
         /// - The server function to be called if called from a server function after the initial render
         pub fn request_parts(&self) -> &RequestParts {
             &self.parts
+        }
+
+        /// Redirect to a new location
+        pub fn location<L: ToString>(&self, location: L) {
+            self.response_headers_mut().insert(
+                hyper::header::LOCATION,
+                hyper::header::HeaderValue::from_str(&location.to_string()).unwrap(),
+            );
+            self.status(hyper::StatusCode::SEE_OTHER);
+        }
+
+        /// Set the status code of the response
+        pub fn status(&self, status: hyper::StatusCode) {
+            *self.status.write().unwrap() = Some(status);
+        }
+
+        /// Get the status code of the response
+        pub fn get_status(&self) -> Option<hyper::StatusCode> {
+            *self.status.read().unwrap()
         }
     }
 
