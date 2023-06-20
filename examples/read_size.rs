@@ -36,7 +36,14 @@ fn app(cx: Scope) -> Element {
             height: "50%",
             background_color: "red",
             onmounted: move |cx| {
-                div_element.set(Some(cx.inner().clone()));
+                to_owned![div_element, dimentions];
+                async move {
+                    let client_rect = cx.inner().get_client_rect();
+                    if let Ok(rect) = client_rect.await {
+                        dimentions.set(rect);
+                    }
+                    div_element.set(Some(cx.inner().clone()));
+                }
             },
             "This element is {dimentions.read():?}"
         }
