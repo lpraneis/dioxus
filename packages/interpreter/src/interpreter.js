@@ -438,7 +438,7 @@ class Interpreter {
 
 // this handler is only provided on the desktop and liveview implementations since this
 // method is not used by the web implementation
-function handler(event, name, bubbles) {
+async function handler(event, name, bubbles, config) {
   let target = event.target;
   if (target != null) {
     let shouldPreventDefault = target.getAttribute(`dioxus-prevent-default`);
@@ -479,7 +479,7 @@ function handler(event, name, bubbles) {
       event.preventDefault();
     }
 
-    let contents = serialize_event(event);
+    let contents = await serialize_event(event);
 
     /*POST_EVENT_SERIALIZATION*/
 
@@ -654,6 +654,7 @@ async function serialize_event(event) {
       if (event.dataTransfer && event.dataTransfer.files) {
         files = await serializeFileList(event.dataTransfer.files);
       }
+
       return { mouse: get_mouse_data(event), files };
     }
     case "click":
