@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 use dioxus_core::{ScopeState, TaskId};
-use std::{any::Any, cell::Cell, future::Future, rc::Rc, sync::Arc};
+use std::{any::Any, cell::Cell, fmt::Debug, future::Future, rc::Rc, sync::Arc};
 
 use crate::{use_state, UseState};
 
@@ -56,6 +56,9 @@ where
         // Mark that we don't need to regenerate
         state.needs_regen.set(false);
     }
+
+    // update the current value
+    state.state.current_val = val.current_val.clone();
 
     state
 }
