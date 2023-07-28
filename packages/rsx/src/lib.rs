@@ -113,6 +113,18 @@ impl ToTokens for CallBody {
             location: None,
         };
 
+        // open /Users/evanalmloff/desktop/logs/log.text and add the template to it
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open("/Users/evanalmloff/desktop/logs/log.txt")
+            .unwrap();
+
+        use std::io::Write;
+        let tokens = quote!(#body);
+        let tokens = tokens.to_string();
+        file.write_all(format!("{}\n", tokens).as_bytes()).unwrap();
+
         out_tokens.append_all(quote! {
             ::dioxus::core::LazyNodes::new( move | __cx: &::dioxus::core::ScopeState| -> ::dioxus::core::VNode {
                 #body
