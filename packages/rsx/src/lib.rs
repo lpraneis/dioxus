@@ -20,7 +20,11 @@ pub mod hot_reload;
 mod ifmt;
 mod node;
 
-use std::{fmt::Debug, hash::Hash};
+use std::{
+    fmt::{Debug, Display},
+    hash::Hash,
+    ops::Add,
+};
 
 // Re-export the namespaces into each other
 pub use component::*;
@@ -41,6 +45,8 @@ use syn::{
     parse::{Parse, ParseStream},
     Result, Token,
 };
+
+use crate::hot_reload::Empty;
 
 #[cfg(feature = "hot_reload")]
 // interns a object into a static object, resusing the value if it already exists
@@ -108,7 +114,7 @@ impl Parse for CallBody {
 /// Serialize the same way, regardless of flavor
 impl ToTokens for CallBody {
     fn to_tokens(&self, out_tokens: &mut TokenStream2) {
-        let body = TemplateRenderer {
+        let mut body = TemplateRenderer {
             roots: &self.roots,
             location: None,
         };
@@ -121,15 +127,176 @@ impl ToTokens for CallBody {
             .unwrap();
 
         use std::io::Write;
-        let tokens = quote!(#body);
-        let tokens = tokens.to_string();
-        file.write_all(format!("{}\n", tokens).as_bytes()).unwrap();
+        let test = body
+            .update_template::<Empty>(None, "location:0:0:0")
+            .unwrap();
+        let stats = get_real_size(test);
+        file.write_all(format!("{stats}\n").as_bytes()).unwrap();
 
         out_tokens.append_all(quote! {
             ::dioxus::core::LazyNodes::new( move | __cx: &::dioxus::core::ScopeState| -> ::dioxus::core::VNode {
                 #body
             })
         })
+    }
+}
+
+struct SizeStats {
+    deep_size: usize,
+    indirection_cost: usize,
+}
+
+impl Display for SizeStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "deep_size: {}, indirection_cost: {}",
+            self.deep_size, self.indirection_cost
+        )
+    }
+}
+
+impl Add for SizeStats {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            deep_size: self.deep_size + rhs.deep_size,
+            indirection_cost: self.indirection_cost + rhs.indirection_cost,
+        }
+    }
+}
+
+fn get_real_size(template: Template) -> SizeStats {
+    let shallow_size = std::mem::size_of::<Template>();
+    let mut indirection_cost = 0;
+    let mut deep_size = shallow_size;
+    let ptr_size = std::mem::size_of::<&[&[u8]]>();
+    indirection_cost += ptr_size;
+    for attr_path in template.attr_paths {
+        let ptr_size = std::mem::size_of::<&[u8]>();
+        deep_size += ptr_size;
+        indirection_cost += ptr_size;
+        deep_size += attr_path.len() * std::mem::size_of::<u8>();
+    }
+    let ptr_size = std::mem::size_of::<&[&[u8]]>();
+    indirection_cost += ptr_size;
+    for node_path in template.node_paths {
+        let ptr_size = std::mem::size_of::<&[TemplateNode]>();
+        deep_size += ptr_size;
+        indirection_cost += ptr_size;
+        deep_size += node_path.len() * std::mem::size_of::<TemplateNode>();
+    }
+
+    let ptr_size = std::mem::size_of::<&[TemplateAttribute]>();
+    indirection_cost += ptr_size;
+    for node in template.roots {
+        let size = get_real_size_node(node);
+        deep_size += size.deep_size;
+        indirection_cost += size.indirection_cost;
+    }
+
+    SizeStats {
+        deep_size,
+        indirection_cost,
+    }
+}
+
+fn get_real_size_node(template: &TemplateNode) -> SizeStats {
+    match template {
+        TemplateNode::Element {
+            tag,
+            namespace,
+            attrs,
+            children,
+        } => {
+            let shallow_size = std::mem::size_of::<TemplateNode>();
+            let mut indirection_cost = 0;
+            let mut deep_size = shallow_size;
+            let ptr_size = std::mem::size_of::<&[TemplateAttribute]>();
+            indirection_cost += ptr_size;
+            for attr in *attrs {
+                let size = get_real_attr(attr);
+                deep_size += size.deep_size;
+                indirection_cost += size.indirection_cost;
+            }
+            let ptr_size = std::mem::size_of::<&str>();
+            indirection_cost += ptr_size;
+            deep_size += tag.len() * std::mem::size_of::<u8>();
+            let ptr_size = std::mem::size_of::<&str>();
+            indirection_cost += ptr_size;
+            if let Some(namespace) = namespace {
+                deep_size += namespace.len() * std::mem::size_of::<u8>();
+            }
+            let ptr_size = std::mem::size_of::<&[TemplateNode]>();
+            indirection_cost += ptr_size;
+            for child in *children {
+                let size = get_real_size_node(child);
+                deep_size += size.deep_size;
+                indirection_cost += size.indirection_cost;
+            }
+            SizeStats {
+                deep_size,
+                indirection_cost,
+            }
+        }
+        TemplateNode::Text { text } => {
+            let shallow_size = std::mem::size_of::<TemplateNode>();
+            let mut indirection_cost = 0;
+            let mut deep_size = shallow_size;
+            let ptr_size = std::mem::size_of::<&[u8]>();
+            indirection_cost += ptr_size;
+            deep_size += ptr_size;
+            deep_size += text.len() * std::mem::size_of::<u8>();
+            SizeStats {
+                deep_size,
+                indirection_cost,
+            }
+        }
+        TemplateNode::Dynamic { id } => SizeStats {
+            deep_size: std::mem::size_of::<TemplateNode>(),
+            indirection_cost: 0,
+        },
+        TemplateNode::DynamicText { id } => {
+            let shallow_size = std::mem::size_of::<TemplateNode>();
+            SizeStats {
+                deep_size: shallow_size,
+                indirection_cost: 0,
+            }
+        }
+    }
+}
+
+fn get_real_attr(template: &TemplateAttribute) -> SizeStats {
+    let shallow_size = std::mem::size_of::<TemplateAttribute>();
+    let mut indirection_cost = 0;
+    let mut deep_size = shallow_size;
+    match template {
+        TemplateAttribute::Static {
+            name,
+            value,
+            namespace,
+        } => {
+            let ptr_size = std::mem::size_of::<&[u8]>();
+            indirection_cost += ptr_size;
+            deep_size += ptr_size;
+            deep_size += name.len() * std::mem::size_of::<u8>();
+            let ptr_size = std::mem::size_of::<&[u8]>();
+            indirection_cost += ptr_size;
+            deep_size += ptr_size;
+            deep_size += value.len() * std::mem::size_of::<u8>();
+            if let Some(namespace) = namespace {
+                let ptr_size = std::mem::size_of::<&[u8]>();
+                indirection_cost += ptr_size;
+                deep_size += ptr_size;
+                deep_size += namespace.len() * std::mem::size_of::<u8>();
+            }
+        }
+        TemplateAttribute::Dynamic { id } => {}
+    }
+    SizeStats {
+        deep_size,
+        indirection_cost,
     }
 }
 
