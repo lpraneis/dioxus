@@ -145,7 +145,7 @@ where
     R: serde::Serialize + serde::de::DeserializeOwned,
 {
     use_context_provider(cx, || {
-        RouterContext::new(
+        crate::prelude::RouterContext::new(
             (cx.props
                 .config
                 .config
@@ -154,7 +154,7 @@ where
             cx.schedule_update_any(),
         )
     });
-    use_context_provider(cx, || OutletContext::<R> {
+    use_context_provider(cx, || crate::prelude::outlet::OutletContext::<R> {
         current_level: 0,
         _marker: std::marker::PhantomData,
     });

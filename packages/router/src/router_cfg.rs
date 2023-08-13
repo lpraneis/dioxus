@@ -38,7 +38,7 @@ where
 {
     fn default() -> Self {
         Self {
-            failure_external_navigation: FailureExternalNavigation::<R>,
+            failure_external_navigation: FailureExternalNavigation,
             history: None,
             on_update: None,
         }
@@ -51,12 +51,12 @@ where
     <R as std::str::FromStr>::Err: std::fmt::Display,
     R: serde::Serialize + serde::de::DeserializeOwned,
 {
-    pub(crate) fn get_history(self) -> Box<dyn HistoryProvider<R>> {
-        self.history.unwrap_or_else(|| {
+    pub(crate) fn take_history(mut self) -> Box<dyn AnyHistoryProvider> {
+        self.history.take().unwrap_or_else(|| {
             #[cfg(all(target_arch = "wasm32", feature = "web"))]
-            let history = Box::<WebHistory<R>>::default();
+            let history = Box::<AnyHistoryProviderImplWrapper<R, WebHistory<R>>>::default();
             #[cfg(not(all(target_arch = "wasm32", feature = "web")))]
-            let history = Box::<MemoryHistory<R>>::default();
+            let history = Box::<AnyHistoryProviderImplWrapper<R, MemoryHistory<R>>>::default();
             history
         })
     }

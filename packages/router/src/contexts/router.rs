@@ -48,6 +48,7 @@ pub struct RouterContext {
 }
 
 impl RouterContext {
+    #[cfg(not(feature = "serde"))]
     pub(crate) fn new<R: Routable + 'static>(
         mut cfg: RouterConfig<R>,
         mark_dirty: Arc<dyn Fn(ScopeId) + Sync + Send>,
@@ -61,7 +62,36 @@ impl RouterContext {
             history: cfg.take_history(),
             unresolved_error: None,
         }));
+        Self::new_inner(cfg, mark_dirty, state)
+    }
 
+    #[cfg(feature = "serde")]
+    pub(crate) fn new<R: Routable + 'static>(
+        mut cfg: RouterConfig<R>,
+        mark_dirty: Arc<dyn Fn(ScopeId) + Sync + Send>,
+    ) -> Self
+    where
+        R: Clone,
+        <R as std::str::FromStr>::Err: std::fmt::Display,
+        R: serde::Serialize + serde::de::DeserializeOwned,
+    {
+        let state = Arc::new(RwLock::new(MutableRouterState {
+            prefix: Default::default(),
+            history: cfg.take_history(),
+            unresolved_error: None,
+        }));
+        Self::new_inner(cfg, mark_dirty, state)
+    }
+
+    fn new_inner<R: Routable + 'static>(
+        cfg: RouterConfig<R>,
+        mark_dirty: Arc<dyn Fn(ScopeId) + Sync + Send>,
+        state: Arc<RwLock<MutableRouterState>>,
+    ) -> Self
+    where
+        R: Clone,
+        <R as std::str::FromStr>::Err: std::fmt::Display,
+    {
         let subscriber_update = mark_dirty.clone();
         let subscribers = Arc::new(RwLock::new(HashSet::new()));
 
