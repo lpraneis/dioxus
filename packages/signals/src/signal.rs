@@ -158,7 +158,7 @@ impl<T: 'static> Signal<T> {
     }
 
     /// Creates a new Signal. Signals are a Copy state management solution with automatic dependency tracking.
-    fn new_with_caller(
+    pub fn new_with_caller(
         value: T,
         #[cfg(debug_assertions)] caller: &'static std::panic::Location<'static>,
     ) -> Self {
@@ -172,6 +172,21 @@ impl<T: 'static> Signal<T> {
                 },
                 #[cfg(debug_assertions)]
                 caller,
+            ),
+        }
+    }
+
+    /// Creates a new Signal with an owning scope
+    pub fn new_in_scope(value: T, owner: ScopeId) -> Self {
+        Self {
+            inner: CopyValue::new_in_scope(
+                SignalData {
+                    subscribers: Default::default(),
+                    effect_subscribers: Default::default(),
+                    update_any: schedule_update_any().expect("in a virtual dom"),
+                    value,
+                },
+                owner,
             ),
         }
     }
