@@ -176,7 +176,7 @@ impl<T: 'static> Signal<T> {
         }
     }
 
-    /// Creates a new Signal with an owning scope
+    /// Create a new signal with a custom owner scope. The signal will be dropped when the owner scope is dropped instead of the current scope.
     pub fn new_in_scope(value: T, owner: ScopeId) -> Self {
         Self {
             inner: CopyValue::new_in_scope(
@@ -209,7 +209,7 @@ impl<T: 'static> Signal<T> {
         } else if let Some(current_scope_id) = current_scope_id() {
             // only subscribe if the vdom is rendering
             if dioxus_core::vdom_is_rendering() {
-                log::trace!(
+                tracing::trace!(
                     "{:?} subscribed to {:?}",
                     self.inner.value,
                     current_scope_id
@@ -242,7 +242,7 @@ impl<T: 'static> Signal<T> {
         {
             let inner = self.inner.read();
             for &scope_id in &*inner.subscribers.borrow() {
-                log::trace!(
+                tracing::trace!(
                     "Write on {:?} triggered update on {:?}",
                     self.inner.value,
                     scope_id
@@ -257,7 +257,7 @@ impl<T: 'static> Signal<T> {
             std::mem::take(&mut *effects)
         };
         for effect in subscribers {
-            log::trace!(
+            tracing::trace!(
                 "Write on {:?} triggered effect {:?}",
                 self.inner.value,
                 effect
